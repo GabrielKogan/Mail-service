@@ -1,0 +1,24 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model MailLog {
+  id           Int      @id @default(autoincrement())
+  messageId    String   @unique @map("message_id")
+  destinatario String
+  nombreDest   String?  @map("nombre_dest")
+  remitente    String   @default("registro@lujandecuyo.gob.ar")
+  asunto       String
+  cuerpo       String?  @db.NVarChar(Max)
+  estadoActual String   @default("enviado") @map("estado_actual") // enviado | error
+  origen       String?
+  fechaEnvio   DateTime @default(now()) @map("fecha_envio")
+  errorDetalle String?  @db.NVarChar(Max) @map("error_detalle")
+
+  @@map("mail_log")
+}
