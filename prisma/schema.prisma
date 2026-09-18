@@ -8,17 +8,36 @@ datasource db {
 }
 
 model MailLog {
-  id           Int      @id @default(autoincrement())
-  messageId    String   @unique @map("message_id")
-  destinatario String
-  nombreDest   String?  @map("nombre_dest")
-  remitente    String   @default("registro@lujandecuyo.gob.ar")
-  asunto       String
-  cuerpo       String?  @db.NVarChar(Max)
-  estadoActual String   @default("enviado") @map("estado_actual") // enviado | error
-  origen       String?
-  fechaEnvio   DateTime @default(now()) @map("fecha_envio")
-  errorDetalle String?  @db.NVarChar(Max) @map("error_detalle")
+  id               Int                @id @default(autoincrement())
+  messageId        String             @unique @map("message_id")
+  destinatario     String
+  nombreDest       String?            @map("nombre_dest")
+  remitente        String             @default("registro@lujandecuyo.gob.ar")
+  asunto           String
+  cuerpo           String?            @db.NVarChar(Max)
+  estadoActual     String             @default("enviado") @map("estado_actual")
+  origen           String?
+  fechaEnvio       DateTime           @default(now()) @map("fecha_envio")
+  errorDetalle     String?            @map("error_detalle") @db.NVarChar(Max)
+  mail_log_eventos mail_log_eventos[]
 
+  @@index([destinatario], map: "IX_mail_log_destinatario")
+  @@index([estadoActual], map: "IX_mail_log_estado")
+  @@index([fechaEnvio(sort: Desc)], map: "IX_mail_log_fecha_envio")
   @@map("mail_log")
+}
+
+model mail_log_eventos {
+  id             Int      @id(map: "PK__mail_log__3213E83F2A3B9D1C") @default(autoincrement())
+  mail_log_id    Int
+  evento         String   @db.VarChar(30)
+  fecha_evento   DateTime
+  ip             String?  @db.VarChar(45)
+  user_agent     String?  @db.VarChar(500)
+  payload_raw    String?  @db.NVarChar(Max)
+  fecha_registro DateTime @default(dbgenerated("sysdatetime()"), map: "DF__mail_log___fecha__22AA2996")
+  mail_log       MailLog  @relation(fields: [mail_log_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_eventos_mail_log")
+
+  @@index([evento], map: "IX_eventos_evento")
+  @@index([mail_log_id], map: "IX_eventos_mail_log_id")
 }

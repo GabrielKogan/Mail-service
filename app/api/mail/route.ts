@@ -1,66 +1,98 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { apiInstance, brevo } from '@/lib/brevo';
+import { getMailProvider, mailErrorMessage } from '@/lib/mail';
+import { getMailFrom } from '@/lib/mail/from';
 import { enviarMailSchema } from '@/lib/validation';
 import { isAuthorized } from '@/lib/auth';
+import { corsPreflight, jsonWithCors } from '@/lib/cors';
+
+export function OPTIONS(req: NextRequest) {
+  return corsPreflight(req);
+}
 
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {
-    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    return jsonWithCors(req, { error: 'No autorizado' }, { status: 401 });
   }
 
-  const body = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonWithCors(req, { error: 'JSON inválido' }, { status: 400 });
+  }
+
   const parsed = enviarMailSchema.safeParse(body);
 
   if (!parsed.success) {
-    return NextResponse.json(
+    return jsonWithCors(
+      req,
       { error: 'Datos inválidos', detalle: parsed.error.flatten() },
       { status: 400 }
     );
   }
 
   const { email, nombre, asunto, cuerpo, origen } = parsed.data;
-
-  const sendSmtpEmail = new brevo.SendSmtpEmail();
-  sendSmtpEmail.sender = {
-    name: 'Municipalidad de Lujan de Cuyo',
-    email: 'registro@lujandecuyo.gob.ar',
-  };
-  sendSmtpEmail.to = [{ email, name: nombre || email }];
-  sendSmtpEmail.subject = asunto;
-  sendSmtpEmail.htmlContent = cuerpo;
+  const remitente = getMailFrom().email;
 
   try {
-    const response = await apiInstance.sendTransacEmail(sendSmtpEmail);
-    const messageId = (response.body as any).messageId as string;
-
-    const log = await prisma.mailLog.create({
-      data: {
-        messageId,
-        destinatario: email,
-        nombreDest: nombre,
-        asunto,
-        cuerpo,
-        origen,
-        estadoActual: 'enviado',
-      },
+    const { messageId } = await getMailProvider().send({
+      to: email,
+      toName: nombre,
+      subject: asunto,
+      html: cuerpo,
     });
 
-    return NextResponse.json({ ok: true, id: log.id, messageId });
-  } catch (err: any) {
-    await prisma.mailLog.create({
-      data: {
-        messageId: `error-${Date.now()}`,
-        destinatario: email,
-        nombreDest: nombre,
-        asunto,
-        cuerpo,
-        origen,
-        estadoActual: 'error',
-        errorDetalle: err?.response?.body?.message ?? err.message ?? 'Error desconocido',
-      },
-    });
+    try {
+      const log = await prisma.mailLog.create({
+        data: {
+          messageId,
+          destinatario: email,
+          nombreDest: nombre,
+          remitente,
+          asunto,
+          cuerpo,
+          origen,
+          estadoActual: 'enviado',
+        },
+      });
 
-    return NextResponse.json({ error: 'No se pudo enviar el mail' }, { status: 502 });
+      return jsonWithCors(req, { ok: true, id: log.id, messageId });
+    } catch (dbErr) {
+      return jsonWithCors(
+        req,
+        {
+          error: 'Mail enviado, pero no se pudo registrar',
+          detalle: mailErrorMessage(dbErr),
+        },
+        { status: 500 }
+      );
+    }
+  } catch (err) {
+    const detalle = mailErrorMessage(err);
+
+    try {
+      await prisma.mailLog.create({
+        data: {
+          messageId: `error-${Date.now()}`,
+          destinatario: email,
+          nombreDest: nombre,
+          remitente,
+          asunto,
+          cuerpo,
+          origen,
+          estadoActual: 'error',
+          errorDetalle: detalle,
+        },
+      });
+    } catch {
+      // El envío ya falló; no tapar el error original si el log también falla.
+    }
+
+    return jsonWithCors(
+      req,
+      { error: 'No se pudo enviar el mail', detalle },
+      { status: 502 }
+    );
   }
 }
