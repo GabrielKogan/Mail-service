@@ -80,7 +80,10 @@ Auth (uno de los dos):
 - `x-internal-token: <INTERNAL_API_TOKEN>`
 - `Authorization: Bearer <INTERNAL_API_TOKEN>`
 
-Body JSON: `{ "email": "...", "nombre": "...", "asunto": "...", "cuerpo": "...", "origen": "..." }`.
+Body JSON: `{ "email", "nombre", "asunto", "cuerpo", "origen", "adjuntos?" }`.
+
+`adjuntos` (opcional): array de `{ "filename", "contentType", "contentBase64" }`.
+Tipos: PDF, DOC, DOCX, PNG, JPG, GIF, WEBP. Máx. 5 archivos, 4 MB c/u, 10 MB en total.
 
 Desde un backend:
 
@@ -88,7 +91,7 @@ Desde un backend:
 curl -X POST http://localhost:3000/api/mail \
   -H "Content-Type: application/json" \
   -H "x-internal-token: $INTERNAL_API_TOKEN" \
-  -d '{"email":"vecino@ejemplo.com","nombre":"Nombre","asunto":"Asunto","cuerpo":"<p>HTML</p>","origen":"turnos"}'
+  -d '{"email":"vecino@ejemplo.com","nombre":"Nombre","asunto":"Asunto","cuerpo":"<p>HTML</p>","origen":"turnos","adjuntos":[{"filename":"turno.pdf","contentType":"application/pdf","contentBase64":"<base64>"}]}'
 ```
 
 Desde un frontend, listá el origen de esa web en `CORS_ORIGINS` (separados por coma, o `*` solo en pruebas). El token en el navegador queda expuesto; lo ideal es un backend proxy.
@@ -112,7 +115,44 @@ await fetch("https://mail.ejemplo.gob.ar/api/mail", {
 
 - `GET /api/dashboard` — lista paginada (sin `cuerpo`). Mismos headers.
   - Query: `estado`, `origen`, `q`, `desde`, `hasta`, `page`
-- `GET /api/dashboard/:id` — detalle (`cuerpo`, `errorDetalle`, `remitente`).
+- `GET /api/dashboard/:id` — detalle (`cuerpo`, `errorDetalle`, `remitente`, `eventos`).
+
+## Tracking de entrega y apertura
+
+Estados posibles: `enviado` → `entregado` → `abierto` (también `rebotado`, `queja`, `error`).
+
+### Apertura (píxel)
+
+Al enviar, si `APP_BASE_URL` está definido, se inserta un píxel en el HTML que pega a
+`GET /api/t/open/:id?t=…`. Cuando el cliente carga imágenes, el estado pasa a `abierto`
+y se guarda un evento en `mail_log_eventos`.
+
+La URL debe ser **alcanzable desde internet** (no `localhost`). En desarrollo podés
+usar un túnel (ngrok, Cloudflare Tunnel, etc.).
+
+### Entrega / rebote / apertura SES
+
+1. En SES (misma región): creá un **Configuration set** (ej. `mail-service-events`).
+2. Activá event publishing: Delivery, Bounce, Complaint, Open (y Click si querés).
+3. Destino: **SNS** (topic Standard) → suscripción **HTTPS** a  
+   `https://TU-DOMINIO/api/webhooks/ses`  
+   Confirmá la suscripción (el endpoint responde al `SubscribeURL` de SNS).
+4. En el `.env`:
+
+```
+APP_BASE_URL=https://tu-mail-service.ejemplo.gob.ar
+SES_CONFIGURATION_SET=mail-service-events
+```
+
+Los envíos SES llevan `X-SES-CONFIGURATION-SET` y el tag `mail_log_id` para correlacionar
+eventos con el registro del dashboard.
+
+**Límites:** “entregado” = el servidor del destinatario aceptó el mail (puede ir a spam).
+“abierto” es aproximado (algunos clientes bloquean imágenes o precargan el píxel).
+
+### Webhook
+
+- `POST /api/webhooks/ses` — sin token interno; pensado para SNS.
 
 ## UI interna
 
@@ -130,6 +170,8 @@ app/
     mail/route.ts
     dashboard/route.ts
     dashboard/[id]/route.ts
+    t/open/[id]/route.ts
+    webhooks/ses/route.ts
   login/page.tsx
   enviar/page.tsx
   dashboard/page.tsx
@@ -148,5 +190,5 @@ components/
 ## Pendiente (siguientes pasos)
 
 - [ ] Autenticación de usuarios (hoy es el token interno)
-- [ ] Sumar webhook + tabla `mail_log_eventos` cuando se necesite tracking de entrega/apertura
 - [ ] Rate limiting en `/api/mail`
+- [ ] Verificar firma SNS (opcional, endurecer webhook)

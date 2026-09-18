@@ -18,6 +18,13 @@ type MailListItem = {
 type MailDetail = MailListItem & {
   cuerpo: string | null;
   errorDetalle: string | null;
+  eventos?: {
+    id: number;
+    evento: string;
+    fechaEvento: string;
+    ip: string | null;
+    userAgent: string | null;
+  }[];
 };
 
 type ListResponse = {
@@ -31,6 +38,15 @@ function formatFecha(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString('es-AR');
+}
+
+function badgeClass(estado: string): string {
+  if (estado === 'error' || estado === 'rebotado' || estado === 'queja' || estado === 'rechazado') {
+    return 'error';
+  }
+  if (estado === 'abierto') return 'abierto';
+  if (estado === 'entregado') return 'entregado';
+  return 'enviado';
 }
 
 export default function DashboardPage() {
@@ -112,8 +128,10 @@ export default function DashboardPage() {
     <main className="page">
       <h1>Dashboard de mails</h1>
       <p className="muted">
-        Registros de envío. El estado es el del momento de la API (enviado /
-        error), sin tracking de entrega todavía.
+        Estados: enviado → entregado (SES) → abierto (píxel o SES). También
+        rebotado / queja. La entrega requiere configuration set + webhook SNS;
+        la apertura con píxel necesita <span className="code">APP_BASE_URL</span>{' '}
+        público.
       </p>
 
       <form className="filters" onSubmit={onFilter}>
@@ -122,6 +140,10 @@ export default function DashboardPage() {
           <select value={estado} onChange={(e) => setEstado(e.target.value)}>
             <option value="">Todos</option>
             <option value="enviado">enviado</option>
+            <option value="entregado">entregado</option>
+            <option value="abierto">abierto</option>
+            <option value="rebotado">rebotado</option>
+            <option value="queja">queja</option>
             <option value="error">error</option>
           </select>
         </label>
@@ -200,11 +222,7 @@ export default function DashboardPage() {
                     <td>{row.origen ?? '—'}</td>
                     <td>{row.remitente || '—'}</td>
                     <td>
-                      <span
-                        className={`badge ${
-                          row.estadoActual === 'error' ? 'error' : 'enviado'
-                        }`}
-                      >
+                      <span className={`badge ${badgeClass(row.estadoActual)}`}>
                         {row.estadoActual}
                       </span>
                     </td>
@@ -267,11 +285,7 @@ export default function DashboardPage() {
             <p className="muted">De: {detail.remitente || '—'}</p>
             <p>
               Estado:{' '}
-              <span
-                className={`badge ${
-                  detail.estadoActual === 'error' ? 'error' : 'enviado'
-                }`}
-              >
+              <span className={`badge ${badgeClass(detail.estadoActual)}`}>
                 {detail.estadoActual}
               </span>
             </p>
@@ -279,6 +293,21 @@ export default function DashboardPage() {
             {detail.errorDetalle ? (
               <div className="alert error">{detail.errorDetalle}</div>
             ) : null}
+            {detail.eventos && detail.eventos.length > 0 ? (
+              <>
+                <p style={{ fontWeight: 600, marginBottom: 6 }}>Eventos</p>
+                <ul className="event-list">
+                  {detail.eventos.map((ev) => (
+                    <li key={ev.id}>
+                      <strong>{ev.evento}</strong> — {formatFecha(ev.fechaEvento)}
+                      {ev.ip ? ` · IP ${ev.ip}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="muted">Sin eventos de entrega/apertura todavía.</p>
+            )}
             <p style={{ fontWeight: 600, marginBottom: 6 }}>Cuerpo</p>
             <div className="html-body">{detail.cuerpo || '—'}</div>
             <div className="actions">

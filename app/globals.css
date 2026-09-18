@@ -277,9 +277,29 @@ tr.clickable:hover {
   color: var(--ok);
 }
 
+.badge.entregado {
+  background: #e8eef8;
+  color: #1e3a5f;
+}
+
+.badge.abierto {
+  background: #eef6e8;
+  color: #2f5d1a;
+}
+
 .badge.error {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.event-list {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+}
+
+.event-list li {
+  margin: 0.25rem 0;
 }
 
 .pager {

@@ -77,6 +77,13 @@ export default function HomePage() {
     asunto: "Asunto",
     cuerpo: "<p>HTML</p>",
     origen: "nombre-del-sistema",
+    adjuntos: [
+      {
+        filename: "documento.pdf",
+        contentType: "application/pdf",
+        contentBase64: "<base64-sin-prefijo-data>",
+      },
+    ],
   }),
 });`}</pre>
       </section>

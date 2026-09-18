@@ -1,13 +1,48 @@
+import { randomUUID } from 'crypto';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getMailProvider, mailErrorMessage } from '@/lib/mail';
 import { getMailFrom } from '@/lib/mail/from';
+import {
+  normalizeMessageId,
+  withOpenPixel,
+} from '@/lib/mail/tracking';
 import { enviarMailSchema } from '@/lib/validation';
 import { isAuthorized } from '@/lib/auth';
 import { corsPreflight, jsonWithCors } from '@/lib/cors';
 
+export const runtime = 'nodejs';
+
 export function OPTIONS(req: NextRequest) {
   return corsPreflight(req);
+}
+
+function sesSendHeaders(mailLogId: number): Record<string, string> | undefined {
+  const configSet = process.env.SES_CONFIGURATION_SET?.trim();
+  const headers: Record<string, string> = {
+    'X-SES-MESSAGE-TAGS': `mail_log_id=${mailLogId}`,
+  };
+  if (configSet) {
+    headers['X-SES-CONFIGURATION-SET'] = configSet;
+  }
+  return headers;
+}
+
+function cuerpoConAdjuntos(
+  cuerpo: string,
+  filenames: string[]
+): string {
+  if (!filenames.length) return cuerpo;
+  const list = filenames.map((f) => escapeHtml(f)).join(', ');
+  return `${cuerpo}<p style="margin-top:1em;font-size:12px;color:#555"><em>Adjuntos: ${list}</em></p>`;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 export async function POST(req: NextRequest) {
@@ -32,61 +67,94 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { email, nombre, asunto, cuerpo, origen } = parsed.data;
+  const { email, nombre, asunto, cuerpo, origen, adjuntos } = parsed.data;
   const remitente = getMailFrom().email;
+  const provider = (process.env.MAIL_PROVIDER ?? 'ses').toLowerCase().trim();
+  const filenames = adjuntos.map((a) => a.filename);
+  const cuerpoLog = cuerpoConAdjuntos(cuerpo, filenames);
+
+  let logId: number | null = null;
 
   try {
+    const pendingMessageId = `pending-${randomUUID()}`;
+    const log = await prisma.mailLog.create({
+      data: {
+        messageId: pendingMessageId,
+        destinatario: email,
+        nombreDest: nombre,
+        remitente,
+        asunto,
+        cuerpo: cuerpoLog,
+        origen,
+        estadoActual: 'enviado',
+      },
+    });
+    logId = log.id;
+
+    const html = withOpenPixel(cuerpoLog, log.id);
+    const headers = provider === 'ses' ? sesSendHeaders(log.id) : undefined;
+
     const { messageId } = await getMailProvider().send({
       to: email,
       toName: nombre,
       subject: asunto,
-      html: cuerpo,
+      html,
+      headers,
+      attachments: adjuntos.map((a) => ({
+        filename: a.filename,
+        contentType: a.contentType,
+        contentBase64: a.contentBase64,
+      })),
     });
 
-    try {
-      const log = await prisma.mailLog.create({
-        data: {
-          messageId,
-          destinatario: email,
-          nombreDest: nombre,
-          remitente,
-          asunto,
-          cuerpo,
-          origen,
-          estadoActual: 'enviado',
-        },
-      });
+    const finalId = normalizeMessageId(messageId);
+    await prisma.mailLog.update({
+      where: { id: log.id },
+      data: {
+        messageId: finalId,
+        cuerpo: html,
+      },
+    });
 
-      return jsonWithCors(req, { ok: true, id: log.id, messageId });
-    } catch (dbErr) {
-      return jsonWithCors(
-        req,
-        {
-          error: 'Mail enviado, pero no se pudo registrar',
-          detalle: mailErrorMessage(dbErr),
-        },
-        { status: 500 }
-      );
-    }
+    return jsonWithCors(req, {
+      ok: true,
+      id: log.id,
+      messageId: finalId,
+      adjuntos: filenames,
+    });
   } catch (err) {
     const detalle = mailErrorMessage(err);
 
-    try {
-      await prisma.mailLog.create({
-        data: {
-          messageId: `error-${Date.now()}`,
-          destinatario: email,
-          nombreDest: nombre,
-          remitente,
-          asunto,
-          cuerpo,
-          origen,
-          estadoActual: 'error',
-          errorDetalle: detalle,
-        },
-      });
-    } catch {
-      // El envío ya falló; no tapar el error original si el log también falla.
+    if (logId != null) {
+      try {
+        await prisma.mailLog.update({
+          where: { id: logId },
+          data: {
+            estadoActual: 'error',
+            errorDetalle: detalle,
+          },
+        });
+      } catch {
+        // ignore
+      }
+    } else {
+      try {
+        await prisma.mailLog.create({
+          data: {
+            messageId: `error-${Date.now()}`,
+            destinatario: email,
+            nombreDest: nombre,
+            remitente,
+            asunto,
+            cuerpo: cuerpoLog,
+            origen,
+            estadoActual: 'error',
+            errorDetalle: detalle,
+          },
+        });
+      } catch {
+        // ignore
+      }
     }
 
     return jsonWithCors(

@@ -50,6 +50,12 @@ export async function sendViaSmtp(
       to: message.toName ? `"${message.toName}" <${message.to}>` : message.to,
       subject: message.subject,
       html: message.html,
+      headers: message.headers,
+      attachments: message.attachments?.map((a) => ({
+        filename: a.filename,
+        contentType: a.contentType,
+        content: Buffer.from(a.contentBase64, 'base64'),
+      })),
     });
     return { messageId: info.messageId || fallbackMessageId() };
   } catch (err) {

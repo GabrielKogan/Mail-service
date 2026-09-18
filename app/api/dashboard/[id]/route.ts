@@ -20,10 +20,34 @@ export async function GET(
     return jsonWithCors(req, { error: 'Id inválido' }, { status: 400 });
   }
 
-  const item = await prisma.mailLog.findUnique({ where: { id } });
+  const item = await prisma.mailLog.findUnique({
+    where: { id },
+    include: {
+      mail_log_eventos: {
+        orderBy: { fecha_evento: 'asc' },
+        select: {
+          id: true,
+          evento: true,
+          fecha_evento: true,
+          ip: true,
+          user_agent: true,
+        },
+      },
+    },
+  });
   if (!item) {
     return jsonWithCors(req, { error: 'No encontrado' }, { status: 404 });
   }
 
-  return jsonWithCors(req, item);
+  const { mail_log_eventos, ...rest } = item;
+  return jsonWithCors(req, {
+    ...rest,
+    eventos: mail_log_eventos.map((e) => ({
+      id: e.id,
+      evento: e.evento,
+      fechaEvento: e.fecha_evento,
+      ip: e.ip,
+      userAgent: e.user_agent,
+    })),
+  });
 }

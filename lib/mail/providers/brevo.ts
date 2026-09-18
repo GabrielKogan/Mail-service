@@ -24,6 +24,12 @@ export class BrevoProvider implements MailProvider {
     sendSmtpEmail.to = [{ email: message.to, name: message.toName || message.to }];
     sendSmtpEmail.subject = message.subject;
     sendSmtpEmail.htmlContent = message.html;
+    if (message.attachments?.length) {
+      sendSmtpEmail.attachment = message.attachments.map((a) => ({
+        name: a.filename,
+        content: a.contentBase64,
+      }));
+    }
 
     try {
       const response = await apiInstance.sendTransacEmail(sendSmtpEmail);
