@@ -7,9 +7,10 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS,
 } from '@/lib/attachment-limits';
+import { MAIL_TEMPLATES } from '@/lib/mail/templates';
 
 type SendOk = { ok: true; id: number; messageId: string; adjuntos?: string[] };
-type SendErr = { error: string; detalle?: string };
+type SendErr = { error: string; detalle?: string | Record<string, unknown> };
 
 type AdjuntoPayload = {
   filename: string;
@@ -40,6 +41,7 @@ export default function EnviarPage() {
   const [asunto, setAsunto] = useState('');
   const [cuerpo, setCuerpo] = useState('<p></p>');
   const [origen, setOrigen] = useState('prueba-ui');
+  const [plantilla, setPlantilla] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -52,6 +54,21 @@ export default function EnviarPage() {
     }
     const next = Array.from(list).slice(0, MAX_ATTACHMENTS);
     setFiles(next);
+  }
+
+  function onPlantillaChange(id: string) {
+    setPlantilla(id);
+    if (!id) {
+      setAsunto('');
+      setCuerpo('<p></p>');
+      setOrigen('prueba-ui');
+      return;
+    }
+    const tpl = MAIL_TEMPLATES.find((t) => t.id === id);
+    if (!tpl) return;
+    setAsunto(tpl.asunto);
+    setCuerpo(tpl.cuerpo);
+    setOrigen(tpl.origen);
   }
 
   async function onSubmit(e: FormEvent) {
@@ -93,7 +110,13 @@ export default function EnviarPage() {
       if (!res.ok) {
         const message = 'error' in data ? data.error : 'No se pudo enviar el mail';
         const detalle = 'detalle' in data ? data.detalle : undefined;
-        setError(detalle ? `${message}: ${detalle}` : message);
+        const extra =
+          typeof detalle === 'string'
+            ? detalle
+            : detalle
+              ? JSON.stringify(detalle)
+              : '';
+        setError(extra ? `${message}: ${extra}` : message);
         return;
       }
       setOk(data as SendOk);
@@ -107,14 +130,31 @@ export default function EnviarPage() {
 
   return (
     <main className="page">
-      <h1>Enviar mail de prueba</h1>
-      <p className="muted">
-        Usa el mismo endpoint que los sistemas internos. Podés adjuntar PDF,
-        DOC/DOCX e imágenes (PNG, JPG, GIF, WEBP), hasta {MAX_ATTACHMENTS}{' '}
-        archivos y {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u.
-      </p>
+      <header className="page-header">
+        <h1>Enviar mail de prueba</h1>
+        <p className="muted">
+          Usa el mismo endpoint que los sistemas internos. Podés adjuntar PDF,
+          DOC/DOCX e imágenes (PNG, JPG, GIF, WEBP), hasta {MAX_ATTACHMENTS}{' '}
+          archivos y {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u. Los ejemplos
+          rellenan asunto, cuerpo y origen; después se pueden editar.
+        </p>
+      </header>
 
-      <form className="form" onSubmit={onSubmit} style={{ marginTop: 16 }}>
+      <form className="form card" onSubmit={onSubmit}>
+        <label>
+          Usar ejemplo
+          <select
+            value={plantilla}
+            onChange={(e) => onPlantillaChange(e.target.value)}
+          >
+            <option value="">Sin ejemplo (escribir a mano)</option>
+            {MAIL_TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Email
           <input

@@ -40,14 +40,33 @@ export async function GET(
   }
 
   const { mail_log_eventos, ...rest } = item;
+  const eventos = mail_log_eventos.map((e) => ({
+    id: e.id,
+    evento: e.evento,
+    fechaEvento: e.fecha_evento,
+    ip: e.ip,
+    userAgent: e.user_agent,
+  }));
+  const tieneEntrega =
+    rest.estadoActual === 'entregado' ||
+    rest.estadoActual === 'abierto' ||
+    eventos.some((e) => e.evento === 'entrega');
+  const tieneApertura =
+    rest.estadoActual === 'abierto' ||
+    eventos.some((e) => e.evento === 'apertura');
+  const rebotado =
+    rest.estadoActual === 'rebotado' ||
+    eventos.some((e) => e.evento === 'rebote');
+
   return jsonWithCors(req, {
     ...rest,
-    eventos: mail_log_eventos.map((e) => ({
-      id: e.id,
-      evento: e.evento,
-      fechaEvento: e.fecha_evento,
-      ip: e.ip,
-      userAgent: e.user_agent,
-    })),
+    eventos,
+    llego: rebotado ? false : tieneEntrega,
+    abrio: tieneApertura,
+    rebotado,
+    fechaEntrega:
+      eventos.find((e) => e.evento === 'entrega')?.fechaEvento ?? null,
+    fechaApertura:
+      eventos.find((e) => e.evento === 'apertura')?.fechaEvento ?? null,
   });
 }

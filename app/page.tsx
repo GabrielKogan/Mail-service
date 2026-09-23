@@ -3,16 +3,18 @@ import Link from 'next/link';
 export default function HomePage() {
   return (
     <main className="page">
-      <h1>Mail Service</h1>
-      <p className="muted">
-        Servicio interno de la Municipalidad de Luján de Cuyo para enviar
-        correos desde los sistemas municipales y registrar a quién se le envió,
-        desde qué origen y si el envío fue aceptado.
-      </p>
+      <header className="page-header">
+        <h1>Mail Service</h1>
+        <p className="muted">
+          Servicio interno de la Municipalidad de Luján de Cuyo para enviar
+          correos desde los sistemas municipales y registrar a quién se le envió,
+          desde qué origen y si el envío fue aceptado.
+        </p>
+      </header>
 
       <div className="grid-2">
-        <section className="card">
-          <h2 style={{ marginTop: 0, fontSize: '1.1rem' }}>Enviar un mail</h2>
+        <section className="card home-card">
+          <h2 className="card-title">Enviar un mail</h2>
           <p className="muted">
             Prueba manual desde el navegador. Los sistemas productivos deben
             usar la API, no esta pantalla.
@@ -23,8 +25,8 @@ export default function HomePage() {
             </Link>
           </div>
         </section>
-        <section className="card">
-          <h2 style={{ marginTop: 0, fontSize: '1.1rem' }}>Dashboard</h2>
+        <section className="card home-card">
+          <h2 className="card-title">Dashboard</h2>
           <p className="muted">
             Historial de envíos con filtros por estado, origen, fecha y texto.
           </p>
@@ -37,9 +39,7 @@ export default function HomePage() {
       </div>
 
       <section className="card" style={{ marginTop: 16 }}>
-        <h2 style={{ marginTop: 0, fontSize: '1.1rem' }}>
-          Cómo lo llaman los sistemas
-        </h2>
+        <h2 className="card-title">Cómo lo llaman los sistemas</h2>
         <p className="muted">
           <span className="code">POST /api/mail</span> con el token interno
           en <span className="code">x-internal-token</span> o{' '}

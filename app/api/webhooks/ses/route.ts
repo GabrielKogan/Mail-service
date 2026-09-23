@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { recordSesEvent } from '@/lib/mail/events';
+import {
+  GLOBAL_SUPPRESSION_ORIGEN,
+  upsertSuppression,
+} from '@/lib/mail/suppression';
 import { normalizeMessageId } from '@/lib/mail/tracking';
 
 type SnsEnvelope = {
@@ -26,7 +30,7 @@ type SesEvent = {
     userAgent?: string;
   };
   delivery?: { timestamp?: string };
-  bounce?: { timestamp?: string };
+  bounce?: { timestamp?: string; bounceType?: string };
   complaint?: { timestamp?: string };
   click?: { timestamp?: string; ipAddress?: string; userAgent?: string };
 };
@@ -115,6 +119,25 @@ async function handleSesPayload(rawMessage: string): Promise<void> {
     ip: open?.ipAddress || click?.ipAddress || null,
     userAgent: open?.userAgent || click?.userAgent || null,
     payloadRaw: rawMessage,
+  });
+
+  const shouldSuppressAll =
+    type === 'Complaint' ||
+    (type === 'Bounce' && payload.bounce?.bounceType === 'Permanent');
+
+  if (!shouldSuppressAll) return;
+
+  const log = await prisma.mailLog.findUnique({
+    where: { id: mailLogId },
+    select: { destinatario: true },
+  });
+  if (!log?.destinatario) return;
+
+  await upsertSuppression({
+    email: log.destinatario,
+    origen: GLOBAL_SUPPRESSION_ORIGEN,
+    motivo: type === 'Complaint' ? 'queja' : 'rebote',
+    mailLogId,
   });
 }
 

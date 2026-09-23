@@ -20,11 +20,28 @@ model MailLog {
   fechaEnvio       DateTime           @default(now()) @map("fecha_envio")
   errorDetalle     String?            @map("error_detalle") @db.NVarChar(Max)
   mail_log_eventos mail_log_eventos[]
+  mail_supresion   mail_supresion[]
 
   @@index([destinatario], map: "IX_mail_log_destinatario")
   @@index([estadoActual], map: "IX_mail_log_estado")
   @@index([fechaEnvio(sort: Desc)], map: "IX_mail_log_fecha_envio")
   @@map("mail_log")
+}
+
+model mail_supresion {
+  id          Int      @id @default(autoincrement())
+  email       String   @db.NVarChar(320)
+  origen      String   @default("*") @db.NVarChar(120)
+  motivo      String   @db.VarChar(20)
+  mail_log_id Int?
+  activo      Boolean  @default(true)
+  fecha       DateTime @default(now())
+  mail_log    MailLog? @relation(fields: [mail_log_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_supresion_mail_log")
+
+  @@unique([email, origen], map: "UQ_mail_supresion_email_origen")
+  @@index([email], map: "IX_mail_supresion_email")
+  @@index([activo], map: "IX_mail_supresion_activo")
+  @@map("mail_supresion")
 }
 
 model mail_log_eventos {

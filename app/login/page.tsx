@@ -40,7 +40,7 @@ export default function LoginPage() {
 
   return (
     <div className="login-wrap">
-      <div className="card" style={{ width: 'min(420px, 100%)' }}>
+      <div className="card login-card">
         <h1>Ingreso</h1>
         <p className="muted">
           Usá el mismo <span className="code">INTERNAL_API_TOKEN</span> que los

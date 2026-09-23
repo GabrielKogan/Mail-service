@@ -8,6 +8,7 @@ const ESTADO_RANK: Record<string, number> = {
   rebotado: 10,
   queja: 10,
   rechazado: 10,
+  suprimido: 10,
 };
 
 export function normalizeMessageId(id: string): string {
@@ -24,7 +25,33 @@ export function trackingSecret(): string {
 
 export function appBaseUrl(): string | null {
   const raw = process.env.APP_BASE_URL?.trim().replace(/\/$/, '');
-  return raw || null;
+  if (raw) return raw;
+  // En desarrollo, si no hay URL pública, usamos localhost para poder probar
+  // el píxel en la misma PC. Gmail en otro dispositivo no llega a localhost.
+  if (process.env.NODE_ENV !== 'production') {
+    const port = process.env.PORT?.trim() || '3000';
+    return `http://localhost:${port}`;
+  }
+  return null;
+}
+
+export function isPublicTrackingUrl(url: string | null): boolean {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname;
+    return host !== 'localhost' && host !== '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+export function trackingConfig() {
+  const baseUrl = appBaseUrl();
+  return {
+    enabled: Boolean(baseUrl),
+    baseUrl,
+    isPublic: isPublicTrackingUrl(baseUrl),
+  };
 }
 
 export function signOpenToken(mailLogId: number): string {
@@ -51,15 +78,69 @@ export function openPixelUrl(mailLogId: number): string | null {
   return `${base}/api/t/open/${mailLogId}?t=${token}`;
 }
 
+function appendBeforeBody(html: string, snippet: string): string {
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${snippet}</body>`);
+  }
+  return `${html}${snippet}`;
+}
+
 /** Inserta píxel de apertura si hay APP_BASE_URL. */
 export function withOpenPixel(html: string, mailLogId: number): string {
   const url = openPixelUrl(mailLogId);
   if (!url) return html;
   const pixel = `<img src="${url}" width="1" height="1" alt="" style="display:none;width:1px;height:1px;border:0;" />`;
-  if (/<\/body>/i.test(html)) {
-    return html.replace(/<\/body>/i, `${pixel}</body>`);
+  return appendBeforeBody(html, pixel);
+}
+
+export function signUnsubToken(mailLogId: number): string {
+  return createHmac('sha256', trackingSecret())
+    .update(`unsub:${mailLogId}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+export function verifyUnsubToken(mailLogId: number, token: string): boolean {
+  const expected = signUnsubToken(mailLogId);
+  if (token.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  } catch {
+    return false;
   }
-  return `${html}${pixel}`;
+}
+
+export function unsubPageUrl(mailLogId: number): string | null {
+  const base = appBaseUrl();
+  if (!base) return null;
+  const token = signUnsubToken(mailLogId);
+  return `${base}/baja/${mailLogId}?t=${token}`;
+}
+
+export function unsubApiUrl(mailLogId: number): string | null {
+  const base = appBaseUrl();
+  if (!base) return null;
+  const token = signUnsubToken(mailLogId);
+  return `${base}/api/t/unsub/${mailLogId}?t=${token}`;
+}
+
+export function listUnsubscribeHeaders(
+  mailLogId: number
+): Record<string, string> | undefined {
+  const url = unsubApiUrl(mailLogId);
+  if (!url) return undefined;
+  return {
+    'List-Unsubscribe': `<${url}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  };
+}
+
+/** Footer de baja si hay APP_BASE_URL (todos los orígenes). */
+export function withUnsubscribeFooter(html: string, mailLogId: number): string {
+  const url = unsubPageUrl(mailLogId);
+  if (!url) return html;
+  const footer = `<p style="margin-top:2em;padding-top:1em;border-top:1px solid #ddd;font-size:12px;color:#555">Municipalidad de Luján de Cuyo<br>Si no querés recibir más avisos de este sistema, <a href="${url}">darse de baja</a>.</p>`;
+  return appendBeforeBody(html, footer);
 }
 
 export function mapSesEventToEstado(eventType: string): string | null {

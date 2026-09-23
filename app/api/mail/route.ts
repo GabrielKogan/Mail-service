@@ -4,8 +4,14 @@ import { prisma } from '@/lib/prisma';
 import { getMailProvider, mailErrorMessage } from '@/lib/mail';
 import { getMailFrom } from '@/lib/mail/from';
 import {
+  findActiveSuppression,
+  suppressionErrorDetail,
+} from '@/lib/mail/suppression';
+import {
+  listUnsubscribeHeaders,
   normalizeMessageId,
   withOpenPixel,
+  withUnsubscribeFooter,
 } from '@/lib/mail/tracking';
 import { enviarMailSchema } from '@/lib/validation';
 import { isAuthorized } from '@/lib/auth';
@@ -17,10 +23,14 @@ export function OPTIONS(req: NextRequest) {
   return corsPreflight(req);
 }
 
-function sesSendHeaders(mailLogId: number): Record<string, string> | undefined {
+function sesSendHeaders(
+  mailLogId: number,
+  extra?: Record<string, string>
+): Record<string, string> | undefined {
   const configSet = process.env.SES_CONFIGURATION_SET?.trim();
   const headers: Record<string, string> = {
     'X-SES-MESSAGE-TAGS': `mail_log_id=${mailLogId}`,
+    ...extra,
   };
   if (configSet) {
     headers['X-SES-CONFIGURATION-SET'] = configSet;
@@ -73,6 +83,38 @@ export async function POST(req: NextRequest) {
   const filenames = adjuntos.map((a) => a.filename);
   const cuerpoLog = cuerpoConAdjuntos(cuerpo, filenames);
 
+  const suppressed = await findActiveSuppression(email, origen);
+  if (suppressed) {
+    const detalle = suppressionErrorDetail(suppressed);
+    try {
+      await prisma.mailLog.create({
+        data: {
+          messageId: `suppressed-${randomUUID()}`,
+          destinatario: email,
+          nombreDest: nombre,
+          remitente,
+          asunto,
+          cuerpo: cuerpoLog,
+          origen,
+          estadoActual: 'suprimido',
+          errorDetalle: detalle,
+        },
+      });
+    } catch {
+      // ignore
+    }
+    return jsonWithCors(
+      req,
+      {
+        error: 'Destinatario en lista de supresión',
+        motivo: suppressed.motivo,
+        origen: suppressed.origen,
+        detalle,
+      },
+      { status: 422 }
+    );
+  }
+
   let logId: number | null = null;
 
   try {
@@ -91,8 +133,15 @@ export async function POST(req: NextRequest) {
     });
     logId = log.id;
 
-    const html = withOpenPixel(cuerpoLog, log.id);
-    const headers = provider === 'ses' ? sesSendHeaders(log.id) : undefined;
+    const html = withUnsubscribeFooter(
+      withOpenPixel(cuerpoLog, log.id),
+      log.id
+    );
+    const unsubHeaders = listUnsubscribeHeaders(log.id);
+    const headers =
+      provider === 'ses'
+        ? sesSendHeaders(log.id, unsubHeaders)
+        : unsubHeaders;
 
     const { messageId } = await getMailProvider().send({
       to: email,

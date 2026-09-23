@@ -1,11 +1,10 @@
-import * as brevo from '@getbrevo/brevo';
 import { MailProviderError } from '../errors';
 import { getMailFrom } from '../from';
 import type { MailMessage, MailProvider, MailSendResult } from '../types';
 
-function brevoErrorMessage(err: unknown): string {
-  const anyErr = err as { response?: { body?: { message?: string } }; message?: string };
-  return anyErr?.response?.body?.message ?? anyErr.message ?? 'Error desconocido al enviar con Brevo';
+function brevoErrorMessageBody(body: any): string {
+  if (!body) return 'Error desconocido al enviar con Brevo';
+  return body.message ?? JSON.stringify(body);
 }
 
 export class BrevoProvider implements MailProvider {
@@ -15,34 +14,44 @@ export class BrevoProvider implements MailProvider {
       throw new MailProviderError('Falta BREVO_API_KEY');
     }
 
-    const apiInstance = new brevo.TransactionalEmailsApi();
-    apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, apiKey);
-
     const from = getMailFrom();
-    const sendSmtpEmail = new brevo.SendSmtpEmail();
-    sendSmtpEmail.sender = { name: from.name, email: from.email };
-    sendSmtpEmail.to = [{ email: message.to, name: message.toName || message.to }];
-    sendSmtpEmail.subject = message.subject;
-    sendSmtpEmail.htmlContent = message.html;
+    const payload: any = {
+      sender: { name: from.name, email: from.email },
+      to: [{ email: message.to, name: message.toName || message.to }],
+      subject: message.subject,
+      htmlContent: message.html,
+    };
+
     if (message.attachments?.length) {
-      sendSmtpEmail.attachment = message.attachments.map((a) => ({
+      payload.attachment = message.attachments.map((a) => ({
         name: a.filename,
         content: a.contentBase64,
       }));
     }
 
     try {
-      const response = await apiInstance.sendTransacEmail(sendSmtpEmail);
-      const messageId = (response.body as { messageId?: string }).messageId;
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `api-key ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new MailProviderError(brevoErrorMessageBody(body));
+      }
+
+      const messageId = body?.messageId;
       if (!messageId) {
         throw new MailProviderError('Brevo no devolvió messageId');
       }
       return { messageId };
     } catch (err) {
-      if (err instanceof MailProviderError) {
-        throw err;
-      }
-      throw new MailProviderError(brevoErrorMessage(err));
+      if (err instanceof MailProviderError) throw err;
+      throw new MailProviderError(String(err ?? 'Error desconocido'));
     }
   }
 }

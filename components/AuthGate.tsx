@@ -3,14 +3,15 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { getToken } from '@/lib/client/token';
+import { isPublicAppPath } from '@/lib/public-paths';
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [ready, setReady] = useState(pathname === '/login');
+  const [ready, setReady] = useState(isPublicAppPath(pathname));
 
   useEffect(() => {
-    if (pathname === '/login') {
+    if (isPublicAppPath(pathname)) {
       setReady(true);
       return;
     }
@@ -21,7 +22,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setReady(true);
   }, [pathname, router]);
 
-  if (pathname === '/login') {
+  if (isPublicAppPath(pathname)) {
     return <>{children}</>;
   }
 

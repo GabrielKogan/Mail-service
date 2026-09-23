@@ -3,18 +3,20 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { clearToken } from '@/lib/client/token';
+import { isPublicAppPath } from '@/lib/public-paths';
 
 const links = [
   { href: '/', label: 'Inicio' },
   { href: '/enviar', label: 'Enviar' },
   { href: '/dashboard', label: 'Dashboard' },
+  { href: '/supresion', label: 'Supresión' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  if (pathname === '/login') {
+  if (isPublicAppPath(pathname)) {
     return <>{children}</>;
   }
 
@@ -27,8 +29,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <header className="shell-header">
         <div className="shell-brand">
-          <strong>Municipalidad de Luján de Cuyo</strong>
-          <span>Mail Service</span>
+          <span className="shell-mark" aria-hidden>
+            ML
+          </span>
+          <div className="shell-brand-text">
+            <strong>Municipalidad de Luján de Cuyo</strong>
+            <span>Mail Service</span>
+          </div>
         </div>
         <nav className="shell-nav">
           {links.map((link) => (
@@ -40,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {link.label}
             </Link>
           ))}
-          <button type="button" onClick={logout}>
+          <button type="button" className="shell-logout" onClick={logout}>
             Salir
           </button>
         </nav>
