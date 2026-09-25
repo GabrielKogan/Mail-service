@@ -11,9 +11,9 @@ const PIXEL = Buffer.from(
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const id = Number((await params).id);
   const token = req.nextUrl.searchParams.get('t') ?? '';
 
   if (Number.isInteger(id) && id > 0 && verifyOpenToken(id, token)) {

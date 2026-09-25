@@ -8,15 +8,24 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:worker": "esbuild worker/index.ts --platform=node --target=node20 --format=cjs --outfile=dist/worker.js --tsconfig=tsconfig.json",
+    "worker": "node dist/worker.js",
+    "worker:dev": "esbuild worker/index.ts --platform=node --target=node20 --format=cjs --outfile=dist/worker.js --tsconfig=tsconfig.json && node --env-file=.env dist/worker.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0",
+    "@aws-sdk/client-sesv2": "^3.1139.0",
+    "@aws-sdk/client-sqs": "^3.1139.0",
+    "@prisma/client": "^5.22.0",
     "next": "^16.3.6",
     "nodemailer": "^10.0.10",
     "postcss": "8.5.23",
+    "prisma": "^5.22.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "recharts": "^3.10.1",
@@ -27,8 +36,9 @@
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "prisma": "^5.20.0",
-    "typescript": "^5.5.0"
+    "esbuild": "^0.28.2",
+    "typescript": "^5.5.0",
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "form-data": "2.5.6",

@@ -1,7 +1,11 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { config } from '@/lib/config';
 
 const ESTADO_RANK: Record<string, number> = {
   error: 0,
+  en_cola: 0,
+  enviando: 0,
+  revisar: 0,
   enviado: 1,
   entregado: 2,
   abierto: 3,
@@ -16,21 +20,39 @@ export function normalizeMessageId(id: string): string {
 }
 
 export function trackingSecret(): string {
-  return (
-    process.env.TRACKING_SECRET?.trim() ||
-    process.env.INTERNAL_API_TOKEN?.trim() ||
-    'mail-service-dev-tracking'
-  );
+  return config().unsubscribeSecret;
+}
+
+/** Secretos aceptados al verificar: el actual y, durante la transición, el anterior. */
+function verificationSecrets(): string[] {
+  const cfg = config();
+  return cfg.unsubscribeSecretPrevious
+    ? [cfg.unsubscribeSecret, cfg.unsubscribeSecretPrevious]
+    : [cfg.unsubscribeSecret];
+}
+
+function signToken(secret: string, purpose: 'open' | 'unsub', mailLogId: number): string {
+  return createHmac('sha256', secret)
+    .update(`${purpose}:${mailLogId}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function verifyToken(purpose: 'open' | 'unsub', mailLogId: number, token: string): boolean {
+  const provided = Buffer.from(token);
+  return verificationSecrets().some((secret) => {
+    const expected = Buffer.from(signToken(secret, purpose, mailLogId));
+    return provided.length === expected.length && timingSafeEqual(provided, expected);
+  });
 }
 
 export function appBaseUrl(): string | null {
-  const raw = process.env.APP_BASE_URL?.trim().replace(/\/$/, '');
-  if (raw) return raw;
+  const cfg = config();
+  if (cfg.appBaseUrl) return cfg.appBaseUrl;
   // En desarrollo, si no hay URL pública, usamos localhost para poder probar
   // el píxel en la misma PC. Gmail en otro dispositivo no llega a localhost.
-  if (process.env.NODE_ENV !== 'production') {
-    const port = process.env.PORT?.trim() || '3000';
-    return `http://localhost:${port}`;
+  if (!cfg.isProduction) {
+    return `http://localhost:${cfg.port || '3000'}`;
   }
   return null;
 }
@@ -55,20 +77,11 @@ export function trackingConfig() {
 }
 
 export function signOpenToken(mailLogId: number): string {
-  return createHmac('sha256', trackingSecret())
-    .update(`open:${mailLogId}`)
-    .digest('hex')
-    .slice(0, 32);
+  return signToken(trackingSecret(), 'open', mailLogId);
 }
 
 export function verifyOpenToken(mailLogId: number, token: string): boolean {
-  const expected = signOpenToken(mailLogId);
-  if (token.length !== expected.length) return false;
-  try {
-    return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
-  } catch {
-    return false;
-  }
+  return verifyToken('open', mailLogId, token);
 }
 
 export function openPixelUrl(mailLogId: number): string | null {
@@ -94,20 +107,11 @@ export function withOpenPixel(html: string, mailLogId: number): string {
 }
 
 export function signUnsubToken(mailLogId: number): string {
-  return createHmac('sha256', trackingSecret())
-    .update(`unsub:${mailLogId}`)
-    .digest('hex')
-    .slice(0, 32);
+  return signToken(trackingSecret(), 'unsub', mailLogId);
 }
 
 export function verifyUnsubToken(mailLogId: number, token: string): boolean {
-  const expected = signUnsubToken(mailLogId);
-  if (token.length !== expected.length) return false;
-  try {
-    return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
-  } catch {
-    return false;
-  }
+  return verifyToken('unsub', mailLogId, token);
 }
 
 export function unsubPageUrl(mailLogId: number): string | null {
@@ -141,6 +145,13 @@ export function withUnsubscribeFooter(html: string, mailLogId: number): string {
   if (!url) return html;
   const footer = `<p style="margin-top:2em;padding-top:1em;border-top:1px solid #ddd;font-size:12px;color:#555">Municipalidad de Luján de Cuyo<br>Si no querés recibir más avisos de este sistema, <a href="${url}">darse de baja</a>.</p>`;
   return appendBeforeBody(html, footer);
+}
+
+/** Pie de baja para la parte de texto plano. */
+export function withUnsubscribeFooterText(text: string, mailLogId: number): string {
+  const url = unsubPageUrl(mailLogId);
+  if (!url) return text;
+  return `${text}\n\nSi no querés recibir más avisos de este sistema, podés darte de baja en:\n${url}`;
 }
 
 export function mapSesEventToEstado(eventType: string): string | null {
@@ -178,6 +189,10 @@ export function mapSesEventToNombre(eventType: string): string {
       return 'click';
     case 'Send':
       return 'envio_ses';
+    case 'DeliveryDelay':
+      return 'demora';
+    case 'Rendering Failure':
+      return 'fallo_render';
     default:
       return eventType.toLowerCase().slice(0, 30);
   }

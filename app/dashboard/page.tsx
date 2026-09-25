@@ -6,6 +6,7 @@ import {
   DashboardStats,
   type StatsData,
 } from '@/components/DashboardStats';
+import { PostmasterCard } from '@/components/PostmasterCard';
 
 type Tab = 'stats' | 'registro';
 
@@ -18,6 +19,7 @@ type MailListItem = {
   asunto: string;
   estadoActual: string;
   origen: string | null;
+  tipo?: string | null;
   fechaEnvio: string;
   llego?: boolean;
   abrio?: boolean;
@@ -35,8 +37,38 @@ type MailDetail = MailListItem & {
     fechaEvento: string;
     ip: string | null;
     userAgent: string | null;
+    interno?: boolean;
+    detalle?: string | null;
   }[];
 };
+
+const EVENTO_LABELS: Record<string, string> = {
+  creado: 'Registrado',
+  encolado: 'En la cola de envío',
+  enviando: 'Enviando al proveedor',
+  aceptado: 'Aceptado por el proveedor',
+  reintento: 'Falló, se reintenta',
+  fallo: 'Falló el envío',
+  suprimido: 'No enviado: destinatario suprimido',
+  revisar: 'A revisar (quedó en "enviando")',
+  agotado: 'Agotó los reintentos',
+  reencolado_auto: 'Reencolado por el reconciliador',
+  reencolado: 'Reencolado desde el dashboard',
+  envio_ses: 'SES lo envió',
+  entrega: 'Entregado',
+  apertura: 'Abierto',
+  click: 'Click en un enlace',
+  rebote: 'Rebote',
+  queja: 'Queja de spam',
+  rechazo: 'Rechazado por SES',
+  demora: 'Entrega demorada',
+  fallo_render: 'Falló el renderizado',
+  baja: 'Baja del destinatario',
+};
+
+function eventoLabel(evento: string): string {
+  return EVENTO_LABELS[evento] ?? evento;
+}
 
 type ListResponse = {
   items: MailListItem[];
@@ -49,6 +81,14 @@ type ListResponse = {
     isPublic: boolean;
   };
   sesConfigSet?: boolean;
+};
+
+type WorkerStatus = {
+  modo: 'sync' | 'queue';
+  workers: { worker: string; ultimoLatido: string; activo: boolean }[];
+  alerta: boolean;
+  enCola: number;
+  revisar: number;
 };
 
 function formatFecha(iso: string): string {
@@ -69,6 +109,8 @@ function badgeClass(estado: string): string {
   }
   if (estado === 'abierto') return 'abierto';
   if (estado === 'entregado') return 'entregado';
+  if (estado === 'en_cola' || estado === 'enviando') return 'pendiente';
+  if (estado === 'revisar') return 'revisar';
   return 'enviado';
 }
 
@@ -88,6 +130,12 @@ function estadoLabel(estado: string): string {
       return 'Error al enviar';
     case 'suprimido':
       return 'Suprimido (no enviado)';
+    case 'en_cola':
+      return 'En cola';
+    case 'enviando':
+      return 'Enviando';
+    case 'revisar':
+      return 'Revisar (no se sabe si salió)';
     default:
       return estado;
   }
@@ -103,6 +151,7 @@ export default function DashboardPage() {
   const [tab, setTab] = useState<Tab>('stats');
   const [estado, setEstado] = useState('');
   const [origen, setOrigen] = useState('');
+  const [tipo, setTipo] = useState('');
   const [q, setQ] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
@@ -121,9 +170,12 @@ export default function DashboardPage() {
     sesConfigSet?: boolean;
   }>({});
   const [origenDia, setOrigenDia] = useState('__all__');
+  const [requeueing, setRequeueing] = useState(false);
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null);
   const appliedRef = useRef({
     estado: '',
     origen: '',
+    tipo: '',
     q: '',
     desde: '',
     hasta: '',
@@ -136,6 +188,7 @@ export default function DashboardPage() {
     const params = new URLSearchParams();
     if (applied.estado) params.set('estado', applied.estado);
     if (applied.origen) params.set('origen', applied.origen);
+    if (applied.tipo) params.set('tipo', applied.tipo);
     if (applied.q) params.set('q', applied.q);
     if (applied.desde) params.set('desde', applied.desde);
     if (applied.hasta) params.set('hasta', applied.hasta);
@@ -202,6 +255,13 @@ export default function DashboardPage() {
   }, [loadStats]);
 
   useEffect(() => {
+    apiFetch('/api/dashboard/worker')
+      .then((res) => (res.ok ? (res.json() as Promise<WorkerStatus>) : null))
+      .then(setWorkerStatus)
+      .catch(() => setWorkerStatus(null));
+  }, []);
+
+  useEffect(() => {
     if (tab === 'registro' && data === null && !loadingList) {
       void loadList(1);
     }
@@ -212,6 +272,7 @@ export default function DashboardPage() {
     appliedRef.current = {
       estado,
       origen: origen.trim(),
+      tipo: tipo.trim(),
       q: q.trim(),
       desde,
       hasta,
@@ -294,6 +355,39 @@ export default function DashboardPage() {
     }
   }
 
+  async function requeue() {
+    if (!detail) return;
+    const confirmar = detail.estadoActual === 'revisar';
+    if (
+      confirmar &&
+      !window.confirm(
+        'No se sabe si SES llegó a enviar este mail. Si lo reencolás, el destinatario podría recibirlo dos veces. ¿Reencolar igual?'
+      )
+    ) {
+      return;
+    }
+    setRequeueing(true);
+    setError('');
+    try {
+      const res = await apiFetch(`/api/dashboard/${detail.id}/requeue`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmar }),
+      });
+      const json = (await res.json()) as { error?: string; detalle?: string };
+      if (!res.ok) {
+        setError([json.error || 'No se pudo reencolar', json.detalle].filter(Boolean).join(': '));
+        return;
+      }
+      await openDetail(detail.id);
+      void loadStats();
+      if (tab === 'registro') void loadList(page);
+    } catch {
+      setError('Error de red al reencolar.');
+    } finally {
+      setRequeueing(false);
+    }
+  }
+
   function filterByEstado(value: string) {
     setEstado(value);
     appliedRef.current = {
@@ -352,6 +446,9 @@ export default function DashboardPage() {
             <option value="queja">queja</option>
             <option value="suprimido">suprimido</option>
             <option value="error">error</option>
+            <option value="en_cola">en cola</option>
+            <option value="enviando">enviando</option>
+            <option value="revisar">revisar</option>
           </select>
         </label>
         <label>
@@ -360,6 +457,14 @@ export default function DashboardPage() {
             value={origen}
             onChange={(e) => setOrigen(e.target.value)}
             placeholder="sistema"
+          />
+        </label>
+        <label>
+          Tipo
+          <input
+            value={tipo}
+            onChange={(e) => setTipo(e.target.value)}
+            placeholder="turno_confirmacion"
           />
         </label>
         <label>
@@ -392,8 +497,25 @@ export default function DashboardPage() {
       </form>
 
       {error ? <div className="alert error">{error}</div> : null}
+      {workerStatus?.alerta ? (
+        <div className="alert error">
+          El worker no está activo
+          {workerStatus.workers[0]
+            ? ` (último latido: ${formatFecha(workerStatus.workers[0].ultimoLatido)})`
+            : ' (nunca registró actividad)'}
+          . Los envíos en cola ({workerStatus.enCola}) y los eventos de SES quedan sin procesar.
+        </div>
+      ) : null}
+      {workerStatus && workerStatus.revisar > 0 ? (
+        <div className="alert warn">
+          Hay {workerStatus.revisar} envío(s) en <strong>revisar</strong>: quedaron a mitad
+          del envío y no se sabe si salieron. Filtrá por ese estado para verlos.
+        </div>
+      ) : null}
 
       {tab === 'stats' ? (
+        <>
+        <PostmasterCard />
         <DashboardStats
           data={stats}
           loading={loadingStats}
@@ -403,6 +525,7 @@ export default function DashboardPage() {
             void loadStats(value);
           }}
         />
+        </>
       ) : (
         <>
           <div className="alert warn">
@@ -486,6 +609,7 @@ export default function DashboardPage() {
                       <th>Destinatario</th>
                       <th>Asunto</th>
                       <th>Origen</th>
+                      <th>Tipo</th>
                       <th>Estado</th>
                       <th>¿Llegó?</th>
                       <th>¿Abrió?</th>
@@ -502,6 +626,7 @@ export default function DashboardPage() {
                         <td>{row.destinatario}</td>
                         <td>{row.asunto}</td>
                         <td>{row.origen ?? '—'}</td>
+                        <td>{row.tipo ?? 'html'}</td>
                         <td>
                           <span
                             className={`badge ${badgeClass(row.estadoActual)}`}
@@ -590,6 +715,7 @@ export default function DashboardPage() {
                   {formatFecha(detail.fechaEnvio)} · {detail.destinatario}
                   {detail.nombreDest ? ` (${detail.nombreDest})` : ''} · origen{' '}
                   {detail.origen ?? '—'}
+                  {detail.tipo ? ` · plantilla ${detail.tipo}` : ''}
                 </p>
                 <p className="muted">De: {detail.remitente || '—'}</p>
                 <p>
@@ -633,24 +759,36 @@ export default function DashboardPage() {
                     <p style={{ fontWeight: 600, marginBottom: 6 }}>Eventos</p>
                     <ul className="event-list">
                       {detail.eventos.map((ev) => (
-                        <li key={ev.id}>
-                          <strong>{ev.evento}</strong> —{' '}
-                          {formatFecha(ev.fechaEvento)}
+                        <li key={ev.id} className={ev.interno ? 'muted' : undefined}>
+                          {ev.interno ? eventoLabel(ev.evento) : <strong>{eventoLabel(ev.evento)}</strong>}{' '}
+                          — {formatFecha(ev.fechaEvento)}
                           {ev.ip ? ` · IP ${ev.ip}` : ''}
+                          {ev.detalle ? ` · ${ev.detalle}` : ''}
                         </li>
                       ))}
                     </ul>
                   </>
-                ) : (
+                ) : null}
+                {!detail.eventos?.some((ev) => !ev.interno) ? (
                   <p className="muted">
                     Sin eventos de entrega/apertura todavía. Si el destinatario
                     abrió el mail pero acá no figura, el píxel no llegó a esta
                     app (URL pública) o SES Delivery no está configurado.
                   </p>
-                )}
+                ) : null}
                 <p style={{ fontWeight: 600, marginBottom: 6 }}>Cuerpo</p>
                 <div className="html-body">{detail.cuerpo || '—'}</div>
                 <div className="actions">
+                  {detail.estadoActual === 'error' || detail.estadoActual === 'revisar' ? (
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={requeueing}
+                      onClick={() => void requeue()}
+                    >
+                      {requeueing ? 'Reencolando…' : 'Reencolar'}
+                    </button>
+                  ) : null}
                   {!detail.llego && !detail.rebotado ? (
                     <button
                       className="btn secondary"

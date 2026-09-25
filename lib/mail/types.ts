@@ -10,8 +10,12 @@ export type MailMessage = {
   toName: string;
   subject: string;
   html: string;
-  /** Headers extra (p. ej. X-SES-CONFIGURATION-SET, X-SES-MESSAGE-TAGS). */
+  /** Parte de texto plano (el mensaje sale multipart/alternative). */
+  text?: string;
+  /** Headers extra (p. ej. List-Unsubscribe, Feedback-ID). */
   headers?: Record<string, string>;
+  /** Etiquetas del envío (p. ej. mail_log_id). Cada proveedor las traduce a su formato. */
+  tags?: Record<string, string>;
   attachments?: MailAttachment[];
 };
 

@@ -17,6 +17,7 @@ export function parseDayStart(value: string): Date {
 export type DashboardFilters = {
   estado?: string | null;
   origen?: string | null;
+  tipo?: string | null;
   q?: string | null;
   desde?: string | null;
   hasta?: string | null;
@@ -28,6 +29,7 @@ export function buildMailLogWhere(
   const where: Prisma.MailLogWhereInput = {};
   if (filters.estado) where.estadoActual = filters.estado;
   if (filters.origen) where.origen = filters.origen;
+  if (filters.tipo) where.tipo = filters.tipo;
   const q = filters.q?.trim();
   if (q) {
     where.OR = [
@@ -49,6 +51,7 @@ export function filtersFromSearchParams(
   return {
     estado: searchParams.get('estado'),
     origen: searchParams.get('origen'),
+    tipo: searchParams.get('tipo'),
     q: searchParams.get('q'),
     desde: searchParams.get('desde'),
     hasta: searchParams.get('hasta'),

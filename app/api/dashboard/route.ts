@@ -1,12 +1,13 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { isAuthorized } from '@/lib/auth';
+import { isDashboardAuthorized } from '@/lib/auth';
 import { corsPreflight, jsonWithCors } from '@/lib/cors';
 import {
   buildMailLogWhere,
   filtersFromSearchParams,
 } from '@/lib/dashboard-query';
 import { trackingConfig } from '@/lib/mail/tracking';
+import { config } from '@/lib/config';
 
 export function OPTIONS(req: NextRequest) {
   return corsPreflight(req);
@@ -14,7 +15,7 @@ export function OPTIONS(req: NextRequest) {
 
 // GET /api/dashboard?estado=enviado&origen=...&q=...&desde=...&hasta=...&page=1
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!isDashboardAuthorized(req)) {
     return jsonWithCors(req, { error: 'No autorizado' }, { status: 401 });
   }
 
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
         asunto: true,
         estadoActual: true,
         origen: true,
+        tipo: true,
         fechaEnvio: true,
         mail_log_eventos: {
           where: { evento: { in: ['entrega', 'apertura', 'rebote', 'queja'] } },
@@ -84,6 +86,6 @@ export async function GET(req: NextRequest) {
     page,
     pageSize,
     tracking: trackingConfig(),
-    sesConfigSet: Boolean(process.env.SES_CONFIGURATION_SET?.trim()),
+    sesConfigSet: Boolean(config().sesConfigurationSet),
   });
 }

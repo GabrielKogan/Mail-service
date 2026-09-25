@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { MailProviderError } from './errors';
+import { MailProviderError, isNetworkError } from './errors';
 import { getMailFrom } from './from';
 import type { MailMessage, MailSendResult } from './types';
 
@@ -19,6 +19,13 @@ function smtpSecure(port: number): boolean {
 
 function fallbackMessageId(): string {
   return `smtp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Respuestas SMTP 4xx (p. ej. 454 por límite de tasa) y errores de red se reintentan; 5xx no. */
+export function isRetryableSmtpError(err: unknown): boolean {
+  const responseCode = (err as { responseCode?: unknown } | null)?.responseCode;
+  if (typeof responseCode === 'number') return responseCode >= 400 && responseCode < 500;
+  return isNetworkError(err);
 }
 
 export function parseSmtpPort(raw: string | undefined, fallback = 587): number {
@@ -50,6 +57,7 @@ export async function sendViaSmtp(
       to: message.toName ? `"${message.toName}" <${message.to}>` : message.to,
       subject: message.subject,
       html: message.html,
+      text: message.text,
       headers: message.headers,
       attachments: message.attachments?.map((a) => ({
         filename: a.filename,
@@ -60,6 +68,6 @@ export async function sendViaSmtp(
     return { messageId: info.messageId || fallbackMessageId() };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error desconocido al enviar por SMTP';
-    throw new MailProviderError(msg);
+    throw new MailProviderError(msg, { retryable: isRetryableSmtpError(err), cause: err });
   }
 }

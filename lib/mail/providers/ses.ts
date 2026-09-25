@@ -1,3 +1,4 @@
+import { config } from '@/lib/config';
 import { MailProviderError } from '../errors';
 import { parseSmtpPort, sendViaSmtp } from '../smtp-send';
 import type { MailMessage, MailProvider, MailSendResult } from '../types';
@@ -18,6 +19,18 @@ function isPlaceholderSmtpCredential(user: string, pass: string): boolean {
 /** SES SMTP username is the IAM Access Key ID, not the IAM user name. */
 function isSesSmtpUsername(user: string): boolean {
   return /^(AKIA|ASIA)[A-Z0-9]{16}$/i.test(user);
+}
+
+/** Por SMTP, SES recibe el configuration set y las etiquetas como headers `X-SES-*`. */
+function withSesHeaders(message: MailMessage): MailMessage {
+  const headers: Record<string, string> = { ...message.headers };
+  const tags = Object.entries(message.tags ?? {});
+  if (tags.length) {
+    headers['X-SES-MESSAGE-TAGS'] = tags.map(([k, v]) => `${k}=${v}`).join(', ');
+  }
+  const configSet = config().sesConfigurationSet;
+  if (configSet) headers['X-SES-CONFIGURATION-SET'] = configSet;
+  return { ...message, headers };
 }
 
 export class SesSmtpProvider implements MailProvider {
@@ -51,7 +64,7 @@ export class SesSmtpProvider implements MailProvider {
     }
 
     try {
-      return await sendViaSmtp(message, {
+      return await sendViaSmtp(withSesHeaders(message), {
         host,
         user,
         pass,

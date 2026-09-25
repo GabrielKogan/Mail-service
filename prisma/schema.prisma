@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlserver"
-  url      = env("DATABASE_URL")
+  provider          = "sqlserver"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 model MailLog {
@@ -19,12 +21,29 @@ model MailLog {
   origen           String?
   fechaEnvio       DateTime           @default(now()) @map("fecha_envio")
   errorDetalle     String?            @map("error_detalle") @db.NVarChar(Max)
+  sistemaId        Int?               @map("sistema_id")
+  /// Único por sistema con el índice filtrado UX_mail_log_idempotencia (SQL a mano en la migración).
+  idempotencyKey   String?            @map("idempotency_key") @db.NVarChar(200)
+  requestHash      String?            @map("request_hash") @db.Char(64)
+  intentos         Int                @default(0)
+  fechaEncolado    DateTime?          @map("fecha_encolado")
+  /// Cuándo pasó a `enviando` por última vez (para detectar envíos trabados).
+  fechaIntento     DateTime?          @map("fecha_intento")
+  /// Tipo de plantilla (lib/mail/plantillas). Null = HTML libre.
+  tipo             String?            @db.VarChar(60)
+  plantillaVersion Int?               @map("plantilla_version")
+  /// Parte de texto plano del mensaje.
+  texto            String?            @db.NVarChar(Max)
+  adjuntos         mail_adjunto[]
+  sistema          mail_sistema?      @relation(fields: [sistemaId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_mail_log_sistema")
   mail_log_eventos mail_log_eventos[]
   mail_supresion   mail_supresion[]
 
+  @@index([sistemaId], map: "IX_mail_log_sistema")
   @@index([destinatario], map: "IX_mail_log_destinatario")
   @@index([estadoActual], map: "IX_mail_log_estado")
   @@index([fechaEnvio(sort: Desc)], map: "IX_mail_log_fecha_envio")
+  @@index([tipo], map: "IX_mail_log_tipo")
   @@map("mail_log")
 }
 
@@ -37,11 +56,81 @@ model mail_supresion {
   activo      Boolean  @default(true)
   fecha       DateTime @default(now())
   mail_log    MailLog? @relation(fields: [mail_log_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_supresion_mail_log")
+  historial   mail_supresion_historial[]
 
   @@unique([email, origen], map: "UQ_mail_supresion_email_origen")
   @@index([email], map: "IX_mail_supresion_email")
   @@index([activo], map: "IX_mail_supresion_activo")
   @@map("mail_supresion")
+}
+
+/// Cada bloqueo y cada reactivación de una supresión, con quién lo hizo y por qué.
+model mail_supresion_historial {
+  id           Int            @id @default(autoincrement())
+  supresionId  Int            @map("supresion_id")
+  /// bloquear | reactivar
+  accion       String         @db.VarChar(20)
+  motivo       String         @db.VarChar(20)
+  /// ses | vecino | admin
+  origenAccion String         @map("origen_accion") @db.VarChar(20)
+  responsable  String?        @db.NVarChar(120)
+  nota         String?        @db.NVarChar(1000)
+  /// Resultado en la lista de supresión de SES: eliminada | no_estaba | no_aplica | error
+  sesResultado String?        @map("ses_resultado") @db.VarChar(30)
+  fecha        DateTime       @default(now())
+  supresion    mail_supresion @relation(fields: [supresionId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_historial_supresion")
+
+  @@index([supresionId, fecha(sort: Desc)], map: "IX_historial_supresion")
+}
+
+/// Sistema municipal que envía correos. El origen sale de la credencial, no del body.
+model mail_sistema {
+  id             Int            @id @default(autoincrement())
+  nombre         String         @db.NVarChar(120)
+  origen         String         @unique(map: "UQ_mail_sistema_origen") @db.NVarChar(120)
+  /// transactional | subscription
+  clasificacion  String         @db.VarChar(20)
+  permiteRawHtml Boolean        @default(false) @map("permite_raw_html")
+  /// Orígenes del navegador permitidos (coma). Null = solo servidor a servidor.
+  corsOrigins    String?        @map("cors_origins") @db.NVarChar(1000)
+  activo         Boolean        @default(true)
+  fechaAlta      DateTime       @default(now()) @map("fecha_alta")
+  api_keys       mail_api_key[]
+  mail_logs      MailLog[]
+}
+
+model mail_api_key {
+  id         Int          @id @default(autoincrement())
+  sistemaId  Int          @map("sistema_id")
+  prefijo    String       @unique(map: "UQ_mail_api_key_prefijo") @db.VarChar(16)
+  /// SHA-256 (hex) de la clave completa.
+  hash       String       @db.Char(64)
+  activo     Boolean      @default(true)
+  fechaAlta  DateTime     @default(now()) @map("fecha_alta")
+  ultimoUso  DateTime?    @map("ultimo_uso")
+  revocadaEn DateTime?    @map("revocada_en")
+  sistema    mail_sistema @relation(fields: [sistemaId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "FK_api_key_sistema")
+
+  @@index([sistemaId], map: "IX_api_key_sistema")
+}
+
+/// Adjuntos de los envíos en cola (SQS no admite mensajes de ese tamaño).
+model mail_adjunto {
+  id          Int     @id @default(autoincrement())
+  mailLogId   Int     @map("mail_log_id")
+  orden       Int     @default(0)
+  filename    String  @db.NVarChar(200)
+  contentType String  @map("content_type") @db.VarChar(120)
+  contenido   Bytes   @db.VarBinary(Max)
+  mail_log    MailLog @relation(fields: [mailLogId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_adjunto_mail_log")
+
+  @@index([mailLogId], map: "IX_adjunto_mail_log")
+}
+
+model mail_worker_heartbeat {
+  worker       String   @id @db.VarChar(100)
+  iniciado     DateTime
+  ultimoLatido DateTime @map("ultimo_latido")
 }
 
 model mail_log_eventos {
@@ -52,9 +141,48 @@ model mail_log_eventos {
   ip             String?  @db.VarChar(45)
   user_agent     String?  @db.VarChar(500)
   payload_raw    String?  @db.NVarChar(Max)
+  /// MessageId de SNS. Único con el índice filtrado UX_eventos_origen (SQL a mano en la migración).
+  origenEventoId String?  @map("origen_evento_id") @db.VarChar(100)
   fecha_registro DateTime @default(dbgenerated("sysdatetime()"), map: "DF__mail_log___fecha__22AA2996")
   mail_log       MailLog  @relation(fields: [mail_log_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "FK_eventos_mail_log")
 
   @@index([evento], map: "IX_eventos_evento")
   @@index([mail_log_id], map: "IX_eventos_mail_log_id")
+}
+
+/// Una sola fila: la cuenta de Google autorizada para Postmaster Tools.
+model mail_google_conexion {
+  id               Int       @id @default(autoincrement())
+  email            String    @db.NVarChar(320)
+  refreshTokenEnc  String    @map("refresh_token_enc") @db.NVarChar(2000)
+  scopes           String    @db.NVarChar(500)
+  estado           String    @default("activa") @db.VarChar(20)
+  conectadoEn      DateTime  @default(now()) @map("conectado_en")
+  ultimaSync       DateTime? @map("ultima_sync")
+  ultimoError      String?   @map("ultimo_error") @db.NVarChar(1000)
+  alertadoVencida  DateTime? @map("alertado_vencida")
+
+  @@map("mail_google_conexion")
+}
+
+/// Un día de métricas de Gmail por dominio (hora del Pacífico, tal como las da Google).
+model mail_postmaster_diario {
+  id                  Int       @id @default(autoincrement())
+  dominio             String    @db.NVarChar(255)
+  fecha               DateTime  @db.Date
+  spamRate            Float?    @map("spam_rate")
+  reputacionDominio   String?   @map("reputacion_dominio") @db.VarChar(20)
+  spfOk               Float?    @map("spf_ok")
+  dkimOk              Float?    @map("dkim_ok")
+  dmarcOk             Float?    @map("dmarc_ok")
+  tlsOk               Float?    @map("tls_ok")
+  erroresEntrega      String?   @map("errores_entrega") @db.NVarChar(Max)
+  raw                 String    @db.NVarChar(Max)
+  alertadoEn          DateTime? @map("alertado_en")
+  alertadoReputacion  DateTime? @map("alertado_reputacion")
+  alertadoAuth        DateTime? @map("alertado_auth")
+
+  @@unique([dominio, fecha], map: "UQ_postmaster_dominio_fecha")
+  @@index([dominio, fecha(sort: Desc)], map: "IX_postmaster_dominio_fecha")
+  @@map("mail_postmaster_diario")
 }

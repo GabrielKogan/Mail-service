@@ -41,42 +41,47 @@ export default function HomePage() {
       <section className="card" style={{ marginTop: 16 }}>
         <h2 className="card-title">Cómo lo llaman los sistemas</h2>
         <p className="muted">
-          <span className="code">POST /api/mail</span> con el token interno
-          en <span className="code">x-internal-token</span> o{' '}
-          <span className="code">Authorization: Bearer</span>. El campo{' '}
-          <span className="code">origen</span> identifica la plataforma y
-          aparece en el dashboard. Desde un frontend hay que listar el origen
-          en <span className="code">CORS_ORIGINS</span>. Preferí un backend
-          proxy: el token en el navegador queda expuesto.
+          <span className="code">POST /api/mail</span> con la clave del sistema
+          en <span className="code">x-api-key</span> (se genera en{' '}
+          <Link href="/sistemas">Sistemas</Link>). El origen sale de la
+          credencial. Mandá siempre una{' '}
+          <span className="code">idempotency_key</span> única por mail: si
+          reintentás con la misma, no se envía dos veces. Respuestas:{' '}
+          <span className="code">200</span>/<span className="code">202</span>{' '}
+          aceptado, <span className="code">422</span> destinatario suprimido
+          (definitivo), <span className="code">409</span> clave reutilizada con
+          otro contenido. El estado se consulta con{' '}
+          <span className="code">GET /api/mail/:id</span>. Preferí llamar desde
+          un backend: la clave en el navegador queda expuesta.
         </p>
         <p className="muted" style={{ marginTop: 12, marginBottom: 6 }}>
           Servidor (curl)
         </p>
         <pre className="code-block">{`curl -X POST http://localhost:3000/api/mail \\
   -H "Content-Type: application/json" \\
-  -H "x-internal-token: <INTERNAL_API_TOKEN>" \\
+  -H "x-api-key: mls_xxxxxxxx_..." \\
   -d '{
     "email": "vecino@ejemplo.com",
     "nombre": "Nombre",
     "asunto": "Asunto",
     "cuerpo": "<p>HTML</p>",
-    "origen": "nombre-del-sistema"
+    "idempotency_key": "turno-12345-confirmacion"
   }'`}</pre>
         <p className="muted" style={{ marginTop: 12, marginBottom: 6 }}>
-          Navegador (fetch)
+          Node (fetch)
         </p>
-        <pre className="code-block">{`await fetch("http://localhost:3000/api/mail", {
+        <pre className="code-block">{`const res = await fetch("http://localhost:3000/api/mail", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    Authorization: "Bearer <INTERNAL_API_TOKEN>",
+    "x-api-key": process.env.MAIL_SERVICE_API_KEY,
   },
   body: JSON.stringify({
     email: "vecino@ejemplo.com",
     nombre: "Nombre",
     asunto: "Asunto",
     cuerpo: "<p>HTML</p>",
-    origen: "nombre-del-sistema",
+    idempotency_key: "expediente-987-actualizacion-3",
     adjuntos: [
       {
         filename: "documento.pdf",
@@ -85,7 +90,9 @@ export default function HomePage() {
       },
     ],
   }),
-});`}</pre>
+});
+// 200 o 202: { ok, id, estado?, messageId?, duplicado? }
+// 422: no reintentar. 409: error de integración (misma clave, otro contenido).`}</pre>
       </section>
     </main>
   );

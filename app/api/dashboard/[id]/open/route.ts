@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { isAuthorized } from '@/lib/auth';
+import { isDashboardAuthorized } from '@/lib/auth';
 import { corsPreflight, jsonWithCors } from '@/lib/cors';
 import { recordMailEvent } from '@/lib/mail/events';
 
@@ -14,13 +14,13 @@ export function OPTIONS(req: NextRequest) {
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!isAuthorized(req)) {
+  if (!isDashboardAuthorized(req)) {
     return jsonWithCors(req, { error: 'No autorizado' }, { status: 401 });
   }
 
-  const id = Number(params.id);
+  const id = Number((await params).id);
   if (!Number.isInteger(id) || id <= 0) {
     return jsonWithCors(req, { error: 'Id inválido' }, { status: 400 });
   }

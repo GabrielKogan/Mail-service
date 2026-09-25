@@ -49,17 +49,17 @@ async function alreadyUnsubscribed(email: string, origen: string): Promise<boole
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const token = req.nextUrl.searchParams.get('t') ?? '';
-  const loaded = await loadVerifiedLog(params.id, token);
+  const loaded = await loadVerifiedLog((await params).id, token);
   if (!loaded.ok) {
     return NextResponse.json({ error: loaded.error }, { status: loaded.status });
   }
 
   const { log } = loaded;
   const origen = log.origen?.trim() || 'desconocido';
-  const critico = isCriticalOrigin(origen);
+  const critico = await isCriticalOrigin(origen);
   const yaDadoDeBaja = critico
     ? false
     : await alreadyUnsubscribed(log.destinatario, origen);
@@ -77,17 +77,17 @@ export async function GET(
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const token = req.nextUrl.searchParams.get('t') ?? '';
-  const loaded = await loadVerifiedLog(params.id, token);
+  const loaded = await loadVerifiedLog((await params).id, token);
   if (!loaded.ok) {
     return NextResponse.json({ error: loaded.error }, { status: loaded.status });
   }
 
   const { log } = loaded;
   const origen = log.origen?.trim() || 'desconocido';
-  const critico = isCriticalOrigin(origen);
+  const critico = await isCriticalOrigin(origen);
 
   if (critico) {
     return NextResponse.json({
@@ -104,6 +104,7 @@ export async function POST(
     origen,
     motivo: 'baja',
     mailLogId: log.id,
+    origenAccion: 'vecino',
   });
 
   try {

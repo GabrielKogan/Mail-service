@@ -492,6 +492,16 @@ tr.clickable:hover {
   color: var(--danger);
 }
 
+.badge.pendiente {
+  background: #eef0f3;
+  color: #4a5361;
+}
+
+.badge.revisar {
+  background: #fdf1dc;
+  color: #8a5a00;
+}
+
 .event-list {
   margin: 0 0 1rem;
   padding-left: 1.2rem;

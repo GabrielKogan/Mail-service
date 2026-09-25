@@ -31,6 +31,7 @@ export type StatsData = {
   };
   porEstado: { estado: string; cantidad: number; porcentaje?: number }[];
   porOrigen: { origen: string; cantidad: number; porcentaje?: number }[];
+  porTipo?: { tipo: string; cantidad: number; porcentaje?: number }[];
   porDia: Record<string, string | number>[];
   estadosSerie?: string[];
   origenDia?: string;
@@ -101,7 +102,7 @@ export function DashboardStats({
     );
   }
 
-  const { resumen, porEstado, porOrigen, porDia, estadosSerie, rango, tracking } =
+  const { resumen, porEstado, porOrigen, porTipo = [], porDia, estadosSerie, rango, tracking } =
     data;
   const origenTop = porOrigen.slice(0, 10);
   const origenOptions = [
@@ -346,6 +347,32 @@ export function DashboardStats({
             </table>
           </div>
         </section>
+
+        {porTipo.length ? (
+          <section className="card">
+            <h2>Por plantilla</h2>
+            <div className="table-wrap stats-mini-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Cantidad</th>
+                    <th>%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {porTipo.map((row) => (
+                    <tr key={row.tipo}>
+                      <td>{row.tipo}</td>
+                      <td>{row.cantidad}</td>
+                      <td>{row.porcentaje ?? 0}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
 
         <section className="card stats-card stats-card-wide">
           <div className="stats-card-header">

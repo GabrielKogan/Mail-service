@@ -1,21 +1,52 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { isAuthorized } from '@/lib/auth';
+import { isDashboardAuthorized } from '@/lib/auth';
 import { corsPreflight, jsonWithCors } from '@/lib/cors';
+import type { InternalEvento } from '@/lib/mail/events';
 
 export function OPTIONS(req: NextRequest) {
   return corsPreflight(req);
 }
 
+const INTERNAL_EVENTOS = new Set<string>([
+  'creado',
+  'encolado',
+  'enviando',
+  'aceptado',
+  'reintento',
+  'fallo',
+  'suprimido',
+  'revisar',
+  'agotado',
+  'reencolado_auto',
+  'reencolado',
+] satisfies InternalEvento[]);
+
+function internalDetail(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (d.intento != null) parts.push(`intento ${d.intento}`);
+    if (d.modo) parts.push(d.modo === 'queue' ? 'por cola' : 'envío directo');
+    if (d.desde) parts.push(`desde ${d.desde}`);
+    if (d.messageId) parts.push(`messageId ${d.messageId}`);
+    if (d.detalle) parts.push(String(d.detalle));
+    return parts.join(' · ').slice(0, 500) || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!isAuthorized(req)) {
+  if (!isDashboardAuthorized(req)) {
     return jsonWithCors(req, { error: 'No autorizado' }, { status: 401 });
   }
 
-  const id = Number(params.id);
+  const id = Number((await params).id);
   if (!Number.isInteger(id) || id <= 0) {
     return jsonWithCors(req, { error: 'Id inválido' }, { status: 400 });
   }
@@ -24,13 +55,14 @@ export async function GET(
     where: { id },
     include: {
       mail_log_eventos: {
-        orderBy: { fecha_evento: 'asc' },
+        orderBy: [{ fecha_evento: 'asc' }, { id: 'asc' }],
         select: {
           id: true,
           evento: true,
           fecha_evento: true,
           ip: true,
           user_agent: true,
+          payload_raw: true,
         },
       },
     },
@@ -40,13 +72,18 @@ export async function GET(
   }
 
   const { mail_log_eventos, ...rest } = item;
-  const eventos = mail_log_eventos.map((e) => ({
-    id: e.id,
-    evento: e.evento,
-    fechaEvento: e.fecha_evento,
-    ip: e.ip,
-    userAgent: e.user_agent,
-  }));
+  const eventos = mail_log_eventos.map((e) => {
+    const interno = INTERNAL_EVENTOS.has(e.evento);
+    return {
+      id: e.id,
+      evento: e.evento,
+      fechaEvento: e.fecha_evento,
+      ip: e.ip,
+      userAgent: e.user_agent,
+      interno,
+      detalle: interno ? internalDetail(e.payload_raw) : null,
+    };
+  });
   const tieneEntrega =
     rest.estadoActual === 'entregado' ||
     rest.estadoActual === 'abierto' ||

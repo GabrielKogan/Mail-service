@@ -1,15 +1,21 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/client/token';
 import {
   ALLOWED_ATTACHMENT_EXTENSIONS,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS,
 } from '@/lib/attachment-limits';
-import { MAIL_TEMPLATES } from '@/lib/mail/templates';
 
-type SendOk = { ok: true; id: number; messageId: string; adjuntos?: string[] };
+type SendOk = {
+  ok: true;
+  id: number;
+  messageId?: string | null;
+  estado?: string;
+  duplicado?: boolean;
+  adjuntos?: string[];
+};
 type SendErr = { error: string; detalle?: string | Record<string, unknown> };
 
 type AdjuntoPayload = {
@@ -17,6 +23,36 @@ type AdjuntoPayload = {
   contentType: string;
   contentBase64: string;
 };
+
+type Campo = {
+  nombre: string;
+  etiqueta: string;
+  tipo: 'linea' | 'texto' | 'url' | 'lista';
+  requerido?: boolean;
+  ayuda?: string;
+  ejemplo: string | string[];
+};
+
+type PlantillaInfo = {
+  tipo: string;
+  version: number;
+  nombre: string;
+  descripcion: string;
+  clasificacion: 'transactional' | 'subscription';
+  origenes: string[] | null;
+  campos: Campo[];
+  ejemplo: Record<string, string | string[]>;
+};
+
+type Sistema = {
+  id: number;
+  nombre: string;
+  origen: string;
+  clasificacion: 'transactional' | 'subscription';
+  permiteRawHtml: boolean;
+};
+
+type Preview = { asunto: string; html: string; texto: string };
 
 const ACCEPT = ALLOWED_ATTACHMENT_EXTENSIONS.map((e) => `.${e}`).join(',');
 
@@ -35,40 +71,99 @@ async function fileToAdjunto(file: File): Promise<AdjuntoPayload> {
   };
 }
 
+function emptyData(campos: Campo[]): Record<string, string | string[]> {
+  return Object.fromEntries(
+    campos.map((c) => [c.nombre, c.tipo === 'lista' ? [] : ''])
+  );
+}
+
 export default function EnviarPage() {
+  const [plantillas, setPlantillas] = useState<PlantillaInfo[]>([]);
+  const [sistemas, setSistemas] = useState<Sistema[]>([]);
+  const [modo, setModo] = useState<'plantilla' | 'html'>('plantilla');
+  const [tipo, setTipo] = useState('');
+  const [data, setData] = useState<Record<string, string | string[]>>({});
+  const [origen, setOrigen] = useState('');
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
   const [asunto, setAsunto] = useState('');
   const [cuerpo, setCuerpo] = useState('<p></p>');
-  const [origen, setOrigen] = useState('prueba-ui');
-  const [plantilla, setPlantilla] = useState('');
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [ok, setOk] = useState<SendOk | null>(null);
 
-  function onFilesChange(list: FileList | null) {
-    if (!list) {
-      setFiles([]);
-      return;
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [pRes, sRes] = await Promise.all([
+          apiFetch('/api/plantillas'),
+          apiFetch('/api/admin/sistemas'),
+        ]);
+        if (pRes.ok) {
+          const json = (await pRes.json()) as { plantillas: PlantillaInfo[] };
+          setPlantillas(json.plantillas);
+        }
+        if (sRes.ok) {
+          const json = (await sRes.json()) as { sistemas: Sistema[] };
+          setSistemas(json.sistemas.filter((s) => s.origen !== 'panel'));
+        }
+      } catch {
+        // El formulario sigue usable: se puede escribir el origen a mano.
+      }
+    })();
+  }, []);
+
+  const plantilla = useMemo(
+    () => plantillas.find((p) => p.tipo === tipo) ?? null,
+    [plantillas, tipo]
+  );
+
+  function onTipoChange(next: string) {
+    setTipo(next);
+    setPreview(null);
+    const p = plantillas.find((x) => x.tipo === next);
+    if (p) {
+      setData(emptyData(p.campos));
+      if (p.origenes?.length === 1) setOrigen(p.origenes[0]);
+    } else {
+      setData({});
     }
-    const next = Array.from(list).slice(0, MAX_ATTACHMENTS);
-    setFiles(next);
   }
 
-  function onPlantillaChange(id: string) {
-    setPlantilla(id);
-    if (!id) {
-      setAsunto('');
-      setCuerpo('<p></p>');
-      setOrigen('prueba-ui');
-      return;
+  function setCampo(nombre: string, value: string | string[]) {
+    setData((prev) => ({ ...prev, [nombre]: value }));
+    setPreview(null);
+  }
+
+  function onFilesChange(list: FileList | null) {
+    setFiles(list ? Array.from(list).slice(0, MAX_ATTACHMENTS) : []);
+  }
+
+  async function onPreview() {
+    if (!tipo) return;
+    setPreviewing(true);
+    setError('');
+    try {
+      const res = await apiFetch('/api/admin/plantillas/preview', {
+        method: 'POST',
+        body: JSON.stringify({ tipo, data, nombre }),
+      });
+      const json = (await res.json()) as Preview | SendErr;
+      if (!res.ok) {
+        const extra =
+          'detalle' in json && json.detalle ? `: ${JSON.stringify(json.detalle)}` : '';
+        setError(('error' in json ? json.error : 'No se pudo previsualizar') + extra);
+        return;
+      }
+      setPreview(json as Preview);
+    } catch {
+      setError('Error de red al previsualizar.');
+    } finally {
+      setPreviewing(false);
     }
-    const tpl = MAIL_TEMPLATES.find((t) => t.id === id);
-    if (!tpl) return;
-    setAsunto(tpl.asunto);
-    setCuerpo(tpl.cuerpo);
-    setOrigen(tpl.origen);
   }
 
   async function onSubmit(e: FormEvent) {
@@ -79,37 +174,30 @@ export default function EnviarPage() {
     try {
       for (const f of files) {
         if (f.size > MAX_ATTACHMENT_BYTES) {
-          setError(
-            `"${f.name}" supera ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB`
-          );
+          setError(`"${f.name}" supera ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB`);
           return;
         }
       }
-
       const adjuntos = await Promise.all(files.map(fileToAdjunto));
-
+      const payload =
+        modo === 'plantilla'
+          ? { email, nombre, tipo, data, origen: origen || undefined, adjuntos }
+          : { email, nombre, asunto, cuerpo, origen: origen || undefined, adjuntos };
       const res = await apiFetch('/api/mail', {
         method: 'POST',
-        body: JSON.stringify({
-          email,
-          nombre,
-          asunto,
-          cuerpo,
-          origen,
-          adjuntos,
-        }),
+        body: JSON.stringify(payload),
       });
       const raw = await res.text();
-      let data: SendOk | SendErr;
+      let parsed: SendOk | SendErr;
       try {
-        data = JSON.parse(raw) as SendOk | SendErr;
+        parsed = JSON.parse(raw) as SendOk | SendErr;
       } catch {
         setError('El servidor devolvió un error inesperado.');
         return;
       }
       if (!res.ok) {
-        const message = 'error' in data ? data.error : 'No se pudo enviar el mail';
-        const detalle = 'detalle' in data ? data.detalle : undefined;
+        const message = 'error' in parsed ? parsed.error : 'No se pudo enviar el mail';
+        const detalle = 'detalle' in parsed ? parsed.detalle : undefined;
         const extra =
           typeof detalle === 'string'
             ? detalle
@@ -119,7 +207,7 @@ export default function EnviarPage() {
         setError(extra ? `${message}: ${extra}` : message);
         return;
       }
-      setOk(data as SendOk);
+      setOk(parsed as SendOk);
       setFiles([]);
     } catch {
       setError('Error de red al enviar.');
@@ -133,28 +221,147 @@ export default function EnviarPage() {
       <header className="page-header">
         <h1>Enviar mail de prueba</h1>
         <p className="muted">
-          Usa el mismo endpoint que los sistemas internos. Podés adjuntar PDF,
-          DOC/DOCX e imágenes (PNG, JPG, GIF, WEBP), hasta {MAX_ATTACHMENTS}{' '}
-          archivos y {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u. Los ejemplos
-          rellenan asunto, cuerpo y origen; después se pueden editar.
+          Usa el mismo endpoint que los sistemas internos. Elegí una plantilla
+          (tipo + data) o, si el sistema lo permite, HTML libre. Adjuntá PDF,
+          DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos y{' '}
+          {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u. Si no elegís sistema,
+          el origen queda como <code>panel</code>.
         </p>
       </header>
 
       <form className="form card" onSubmit={onSubmit}>
         <label>
-          Usar ejemplo
-          <select
-            value={plantilla}
-            onChange={(e) => onPlantillaChange(e.target.value)}
-          >
-            <option value="">Sin ejemplo (escribir a mano)</option>
-            {MAIL_TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.label}
+          Sistema (origen)
+          <select value={origen} onChange={(e) => setOrigen(e.target.value)}>
+            <option value="">panel (sin sistema)</option>
+            {sistemas.map((s) => (
+              <option key={s.id} value={s.origen}>
+                {s.nombre} ({s.origen}) · {s.clasificacion}
+                {s.permiteRawHtml ? ' · HTML libre' : ''}
               </option>
             ))}
           </select>
         </label>
+
+        <div className="actions" style={{ marginTop: 0 }}>
+          <button
+            type="button"
+            className={`btn${modo === 'plantilla' ? '' : ' secondary'}`}
+            onClick={() => setModo('plantilla')}
+          >
+            Plantilla
+          </button>
+          <button
+            type="button"
+            className={`btn${modo === 'html' ? '' : ' secondary'}`}
+            onClick={() => setModo('html')}
+          >
+            HTML libre
+          </button>
+        </div>
+
+        {modo === 'plantilla' ? (
+          <>
+            <label>
+              Plantilla
+              <select required value={tipo} onChange={(e) => onTipoChange(e.target.value)}>
+                <option value="">Elegí un tipo</option>
+                {plantillas.map((p) => (
+                  <option key={p.tipo} value={p.tipo}>
+                    {p.nombre} ({p.tipo})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {plantilla ? (
+              <p className="muted" style={{ marginTop: 0 }}>
+                {plantilla.descripcion} · {plantilla.clasificacion}
+                {plantilla.origenes ? ` · solo ${plantilla.origenes.join(', ')}` : ''}
+              </p>
+            ) : null}
+            {plantilla?.campos.map((c) => (
+              <label key={c.nombre}>
+                {c.etiqueta}
+                {c.requerido ? ' *' : ''}
+                {c.tipo === 'texto' || c.tipo === 'lista' ? (
+                  <textarea
+                    required={c.requerido}
+                    value={
+                      c.tipo === 'lista'
+                        ? ((data[c.nombre] as string[]) ?? []).join('\n')
+                        : ((data[c.nombre] as string) ?? '')
+                    }
+                    onChange={(e) =>
+                      setCampo(
+                        c.nombre,
+                        c.tipo === 'lista'
+                          ? e.target.value.split(/\r?\n/).filter((l) => l.trim())
+                          : e.target.value
+                      )
+                    }
+                    placeholder={
+                      Array.isArray(c.ejemplo) ? c.ejemplo.join('\n') : c.ejemplo
+                    }
+                  />
+                ) : (
+                  <input
+                    required={c.requerido}
+                    type={c.tipo === 'url' ? 'url' : 'text'}
+                    value={(data[c.nombre] as string) ?? ''}
+                    onChange={(e) => setCampo(c.nombre, e.target.value)}
+                    placeholder={typeof c.ejemplo === 'string' ? c.ejemplo : ''}
+                  />
+                )}
+                {c.ayuda ? <span className="muted">{c.ayuda}</span> : null}
+                {c.tipo === 'lista' ? (
+                  <span className="muted">Una línea por ítem.</span>
+                ) : null}
+              </label>
+            ))}
+            <div className="actions" style={{ marginTop: 0 }}>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={!tipo || previewing}
+                onClick={() => void onPreview()}
+              >
+                {previewing ? 'Armando…' : 'Vista previa'}
+              </button>
+            </div>
+            {preview ? (
+              <div className="card" style={{ margin: 0 }}>
+                <p>
+                  <strong>{preview.asunto}</strong>
+                </p>
+                <div className="html-body" dangerouslySetInnerHTML={{ __html: preview.html }} />
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <div className="alert warn">
+              El HTML libre solo lo aceptan los sistemas con esa opción activa.
+              Conviene migrar a una plantilla (tipo + data).
+            </div>
+            <label>
+              Asunto
+              <input
+                required
+                value={asunto}
+                onChange={(e) => setAsunto(e.target.value)}
+              />
+            </label>
+            <label>
+              Cuerpo (HTML)
+              <textarea
+                required
+                value={cuerpo}
+                onChange={(e) => setCuerpo(e.target.value)}
+              />
+            </label>
+          </>
+        )}
+
         <label>
           Email
           <input
@@ -166,34 +373,7 @@ export default function EnviarPage() {
         </label>
         <label>
           Nombre
-          <input
-            value={nombre}
-            onChange={(e) => setNombre(e.target.value)}
-          />
-        </label>
-        <label>
-          Asunto
-          <input
-            required
-            value={asunto}
-            onChange={(e) => setAsunto(e.target.value)}
-          />
-        </label>
-        <label>
-          Cuerpo (HTML)
-          <textarea
-            required
-            value={cuerpo}
-            onChange={(e) => setCuerpo(e.target.value)}
-          />
-        </label>
-        <label>
-          Origen
-          <input
-            value={origen}
-            onChange={(e) => setOrigen(e.target.value)}
-            placeholder="nombre del sistema"
-          />
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} />
         </label>
         <label>
           Adjuntos
@@ -216,11 +396,13 @@ export default function EnviarPage() {
         {error ? <div className="alert error">{error}</div> : null}
         {ok ? (
           <div className="alert ok">
-            SES aceptó el mail (id {ok.id} — {ok.messageId})
-            {ok.adjuntos?.length
-              ? ` · adjuntos: ${ok.adjuntos.join(', ')}`
-              : ''}
-            . Revisá spam si no aparece.
+            {ok.duplicado
+              ? `Ya existía un envío con esa clave (id ${ok.id})`
+              : ok.estado === 'en_cola'
+                ? `Mail encolado (id ${ok.id}); el worker lo envía en segundos`
+                : `SES aceptó el mail (id ${ok.id} — ${ok.messageId})`}
+            {ok.adjuntos?.length ? ` · adjuntos: ${ok.adjuntos.join(', ')}` : ''}.
+            Revisá spam si no aparece.
           </div>
         ) : null}
         <button className="btn" type="submit" disabled={loading}>

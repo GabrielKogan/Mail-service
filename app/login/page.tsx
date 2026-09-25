@@ -15,7 +15,7 @@ export default function LoginPage() {
     setError('');
     const value = token.trim();
     if (!value) {
-      setError('Ingresá el token interno.');
+      setError('Ingresá el token de administración.');
       return;
     }
     setLoading(true);
@@ -43,13 +43,12 @@ export default function LoginPage() {
       <div className="card login-card">
         <h1>Ingreso</h1>
         <p className="muted">
-          Usá el mismo <span className="code">INTERNAL_API_TOKEN</span> que los
-          sistemas internos envían en el header{' '}
-          <span className="code">x-internal-token</span>.
+          Usá el <span className="code">ADMIN_TOKEN</span> configurado en el
+          servidor. Es distinto de las claves que usan los sistemas para enviar.
         </p>
         <form className="form" onSubmit={onSubmit} style={{ marginTop: 16 }}>
           <label>
-            Token interno
+            Token de administración
             <input
               type="password"
               autoComplete="off"

@@ -21,6 +21,9 @@ export class BrevoProvider implements MailProvider {
       subject: message.subject,
       htmlContent: message.html,
     };
+    if (message.text) payload.textContent = message.text;
+    // Sin esto Brevo no manda List-Unsubscribe ni Feedback-ID.
+    if (message.headers && Object.keys(message.headers).length) payload.headers = message.headers;
 
     if (message.attachments?.length) {
       payload.attachment = message.attachments.map((a) => ({
@@ -41,7 +44,9 @@ export class BrevoProvider implements MailProvider {
 
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new MailProviderError(brevoErrorMessageBody(body));
+        throw new MailProviderError(brevoErrorMessageBody(body), {
+          retryable: res.status === 429 || res.status >= 500,
+        });
       }
 
       const messageId = body?.messageId;
@@ -51,7 +56,8 @@ export class BrevoProvider implements MailProvider {
       return { messageId };
     } catch (err) {
       if (err instanceof MailProviderError) throw err;
-      throw new MailProviderError(String(err ?? 'Error desconocido'));
+      // fetch solo lanza por errores de red o de timeout.
+      throw new MailProviderError(String(err ?? 'Error desconocido'), { retryable: true, cause: err });
     }
   }
 }

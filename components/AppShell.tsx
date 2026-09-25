@@ -10,6 +10,7 @@ const links = [
   { href: '/enviar', label: 'Enviar' },
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/supresion', label: 'Supresión' },
+  { href: '/sistemas', label: 'Sistemas' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

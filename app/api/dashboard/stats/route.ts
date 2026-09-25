@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { isAuthorized } from '@/lib/auth';
+import { isDashboardAuthorized } from '@/lib/auth';
 import { corsPreflight, jsonWithCors } from '@/lib/cors';
 import {
   buildMailLogWhere,
@@ -40,7 +40,7 @@ function dayKey(d: Date): string {
 
 // GET /api/dashboard/stats?desde=&hasta=&origen=&estado=&q=
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!isDashboardAuthorized(req)) {
     return jsonWithCors(req, { error: 'No autorizado' }, { status: 401 });
   }
 
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
     whereSerie.fechaEnvio = whereSerieBase.fechaEnvio;
   }
 
-  const [total, porEstadoGrouped, porOrigenGrouped, fechas, aperturasEventos] =
+  const [total, porEstadoGrouped, porOrigenGrouped, porTipoGrouped, fechas, aperturasEventos] =
     await Promise.all([
       prisma.mailLog.count({ where }),
       prisma.mailLog.groupBy({
@@ -96,6 +96,12 @@ export async function GET(req: NextRequest) {
         where,
         _count: { _all: true },
         orderBy: { _count: { origen: 'desc' } },
+      }),
+      prisma.mailLog.groupBy({
+        by: ['tipo'],
+        where,
+        _count: { _all: true },
+        orderBy: { _count: { tipo: 'desc' } },
       }),
       prisma.mailLog.findMany({
         where: whereSerie,
@@ -126,6 +132,13 @@ export async function GET(req: NextRequest) {
     origen: r.origen?.trim() || 'sin-origen',
     cantidad: r._count._all,
     porcentaje: pct(r._count._all, totalOrigenes),
+  }));
+
+  const totalTipos = porTipoGrouped.reduce((s, r) => s + r._count._all, 0);
+  const porTipo = porTipoGrouped.map((r) => ({
+    tipo: r.tipo?.trim() || 'html',
+    cantidad: r._count._all,
+    porcentaje: pct(r._count._all, totalTipos),
   }));
 
   type DayBucket = {
@@ -199,6 +212,7 @@ export async function GET(req: NextRequest) {
     },
     porEstado,
     porOrigen,
+    porTipo,
     porDia,
     estadosSerie: estadosEnSerie,
     origenDia: origenDia ?? '__all__',
@@ -211,6 +225,7 @@ export async function GET(req: NextRequest) {
           filters.hasta ||
           filters.estado ||
           filters.origen ||
+          filters.tipo ||
           filters.q
       ),
     },
