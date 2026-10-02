@@ -1,0 +1,250 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Mail Service - colas SQS (envios y eventos de SES) con sus colas de fallidos,
+  suscripcion del topico SNS de SES, usuarios IAM mail-api y mail-worker y alarmas.
+  Desplegar en la misma region que SES y el topico SNS (eu-central-1).
+
+Parameters:
+  SesSnsTopicArn:
+    Type: String
+    Description: ARN del topico SNS donde publica el configuration set de SES.
+  SesConfigurationSetName:
+    Type: String
+    Description: Nombre del configuration set de SES (SES_CONFIGURATION_SET).
+  MailFromEmail:
+    Type: String
+    Description: Remitente autorizado (MAIL_FROM_EMAIL). El worker solo puede enviar desde esta direccion.
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: Email que recibe las alarmas (opcional; hay que confirmar la suscripcion).
+  QueuePrefix:
+    Type: String
+    Default: mail
+    Description: Prefijo de los nombres de las colas (mail-send, mail-events, ...).
+
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+
+Resources:
+  # ---------- Colas ----------
+  MailSendDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${QueuePrefix}-send-dlq'
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  MailSendQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${QueuePrefix}-send'
+      VisibilityTimeout: 120
+      ReceiveMessageWaitTimeSeconds: 20
+      MessageRetentionPeriod: 345600
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MailSendDlq.Arn
+        maxReceiveCount: 5
+
+  MailEventsDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${QueuePrefix}-events-dlq'
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  MailEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${QueuePrefix}-events'
+      VisibilityTimeout: 60
+      ReceiveMessageWaitTimeSeconds: 20
+      MessageRetentionPeriod: 345600
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MailEventsDlq.Arn
+        maxReceiveCount: 5
+
+  # Solo el topico de SES puede publicar en mail-events.
+  MailEventsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref MailEventsQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSesTopic
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt MailEventsQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref SesSnsTopicArn
+
+  # Con el sobre SNS (RawMessageDelivery=false) el worker recibe MessageId y la firma.
+  MailEventsSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: MailEventsQueuePolicy
+    Properties:
+      TopicArn: !Ref SesSnsTopicArn
+      Protocol: sqs
+      Endpoint: !GetAtt MailEventsQueue.Arn
+      RawMessageDelivery: false
+
+  # ---------- IAM ----------
+  MailApiUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: mail-api
+      Policies:
+        - PolicyName: mail-api-sqs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt MailSendQueue.Arn
+        # Reactivar rebotes/quejas en la lista de supresión de la cuenta y mostrar
+        # el estado de SES en /sistemas. Las acciones de cuenta no admiten recurso.
+        - PolicyName: mail-api-ses-estado
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:GetAccount
+                  - ses:GetSuppressedDestination
+                  - ses:DeleteSuppressedDestination
+                Resource: '*'
+              - Effect: Allow
+                Action: ses:GetEmailIdentity
+                Resource: !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+              - Effect: Allow
+                Action: ses:GetConfigurationSet
+                Resource: !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SesConfigurationSetName}'
+
+  MailWorkerUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: mail-worker
+      Policies:
+        - PolicyName: mail-worker-sqs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt MailSendQueue.Arn
+                  - !GetAtt MailSendDlq.Arn
+                  - !GetAtt MailEventsQueue.Arn
+                  - !GetAtt MailEventsDlq.Arn
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt MailSendQueue.Arn
+        - PolicyName: mail-worker-ses
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+                  - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SesConfigurationSetName}'
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: !Ref MailFromEmail
+
+  # ---------- Alarmas ----------
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${QueuePrefix}-service-alarms'
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  MailSendDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${QueuePrefix}-send-dlq-no-vacia'
+      AlarmDescription: Hay envios que agotaron los reintentos en SQS.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt MailSendDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  MailEventsDlqAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${QueuePrefix}-events-dlq-no-vacia'
+      AlarmDescription: Hay eventos de SES que no se pudieron procesar.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt MailEventsDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  MailSendAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${QueuePrefix}-send-atrasada'
+      AlarmDescription: El mensaje mas viejo de mail-send supera 10 minutos (worker caido o atrasado).
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt MailSendQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 600
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+Outputs:
+  SqsSendQueueUrl:
+    Description: SQS_SEND_QUEUE_URL
+    Value: !Ref MailSendQueue
+  SqsSendDlqUrl:
+    Description: SQS_SEND_DLQ_URL
+    Value: !Ref MailSendDlq
+  SqsEventsQueueUrl:
+    Description: SQS_EVENTS_QUEUE_URL
+    Value: !Ref MailEventsQueue
+  SqsEventsDlqUrl:
+    Description: SQS_EVENTS_DLQ_URL (solo para inspeccion manual)
+    Value: !Ref MailEventsDlq
+  AlarmTopicArn:
+    Value: !Ref AlarmTopic
