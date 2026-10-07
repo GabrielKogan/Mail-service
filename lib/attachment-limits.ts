@@ -1,7 +1,10 @@
-/** Límite por archivo (bytes). SES recomienda no superar ~10 MB el mensaje completo. */
-export const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
-export const MAX_ATTACHMENTS = 5;
-export const MAX_ATTACHMENTS_TOTAL_BYTES = 10 * 1024 * 1024;
+/**
+ * Tope por archivo y del conjunto. SES acepta 40 MB el mensaje MIME ya
+ * codificado: 28 MB decodificados quedan cerca de 38 MB con el base64.
+ */
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 15;
+export const MAX_ATTACHMENTS_TOTAL_BYTES = 28 * 1024 * 1024;
 
 const ALLOWED_BY_EXT: Record<string, string[]> = {
   pdf: ['application/pdf'],

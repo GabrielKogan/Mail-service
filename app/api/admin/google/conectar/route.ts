@@ -72,5 +72,7 @@ export async function DELETE(req: NextRequest) {
     }
     await prisma.mail_google_conexion.delete({ where: { id: row.id } });
   }
+  const { resetGoogleAccessCache } = await import('@/lib/google/sync');
+  resetGoogleAccessCache();
   return NextResponse.json({ ok: true });
 }

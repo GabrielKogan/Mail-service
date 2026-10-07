@@ -7,6 +7,7 @@ import {
   type StatsData,
 } from '@/components/DashboardStats';
 import { PostmasterCard } from '@/components/PostmasterCard';
+import { rangoSerieInicial } from '@/lib/mail/serie-range';
 
 type Tab = 'stats' | 'registro';
 
@@ -141,6 +142,8 @@ function estadoLabel(estado: string): string {
   }
 }
 
+type FiltroRapido = '' | 'llego' | 'abrio' | 'enviado';
+
 function siNo(value: boolean | undefined, unknownLabel = 'Sin dato'): string {
   if (value === true) return 'Sí';
   if (value === false) return 'No';
@@ -150,6 +153,7 @@ function siNo(value: boolean | undefined, unknownLabel = 'Sin dato'): string {
 export default function DashboardPage() {
   const [tab, setTab] = useState<Tab>('stats');
   const [estado, setEstado] = useState('');
+  const [filtroRapido, setFiltroRapido] = useState<FiltroRapido>('');
   const [origen, setOrigen] = useState('');
   const [tipo, setTipo] = useState('');
   const [q, setQ] = useState('');
@@ -170,6 +174,8 @@ export default function DashboardPage() {
     sesConfigSet?: boolean;
   }>({});
   const [origenDia, setOrigenDia] = useState('__all__');
+  const [desdeDia, setDesdeDia] = useState(() => rangoSerieInicial().desde);
+  const [hastaDia, setHastaDia] = useState(() => rangoSerieInicial().hasta);
   const [requeueing, setRequeueing] = useState(false);
   const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null);
   const appliedRef = useRef({
@@ -179,9 +185,15 @@ export default function DashboardPage() {
     q: '',
     desde: '',
     hasta: '',
+    llego: '',
+    abrio: '',
   });
   const origenDiaRef = useRef(origenDia);
   origenDiaRef.current = origenDia;
+  const desdeDiaRef = useRef(desdeDia);
+  const hastaDiaRef = useRef(hastaDia);
+  desdeDiaRef.current = desdeDia;
+  hastaDiaRef.current = hastaDia;
 
   const filterParams = useCallback(() => {
     const applied = appliedRef.current;
@@ -192,17 +204,23 @@ export default function DashboardPage() {
     if (applied.q) params.set('q', applied.q);
     if (applied.desde) params.set('desde', applied.desde);
     if (applied.hasta) params.set('hasta', applied.hasta);
+    if (applied.llego) params.set('llego', applied.llego);
+    if (applied.abrio) params.set('abrio', applied.abrio);
     return params;
   }, []);
 
   const loadStats = useCallback(
-    async (origenDiaOverride?: string) => {
+    async (override?: { origenDia?: string; desdeDia?: string; hastaDia?: string }) => {
       setLoadingStats(true);
       setError('');
       try {
         const params = filterParams();
-        const od = origenDiaOverride ?? origenDiaRef.current;
+        const od = override?.origenDia ?? origenDiaRef.current;
         params.set('origenDia', od || '__all__');
+        const desde = override?.desdeDia ?? desdeDiaRef.current;
+        const hasta = override?.hastaDia ?? hastaDiaRef.current;
+        if (desde) params.set('desdeDia', desde);
+        if (hasta) params.set('hastaDia', hasta);
         const res = await apiFetch(`/api/dashboard/stats?${params.toString()}`);
         if (!res.ok) {
           setError('No se pudieron cargar las estadísticas.');
@@ -276,7 +294,10 @@ export default function DashboardPage() {
       q: q.trim(),
       desde,
       hasta,
+      llego: '',
+      abrio: '',
     };
+    setFiltroRapido(estado === 'enviado' ? 'enviado' : '');
     void loadStats();
     if (tab === 'registro') {
       void loadList(1);
@@ -388,11 +409,15 @@ export default function DashboardPage() {
     }
   }
 
-  function filterByEstado(value: string) {
-    setEstado(value);
+  function aplicarFiltroRapido(value: FiltroRapido) {
+    setFiltroRapido(value);
+    const nextEstado = value === 'enviado' ? 'enviado' : '';
+    setEstado(nextEstado);
     appliedRef.current = {
       ...appliedRef.current,
-      estado: value,
+      estado: nextEstado,
+      llego: value === 'llego' ? '1' : '',
+      abrio: value === 'abrio' ? '1' : '',
     };
     void loadStats();
     void loadList(1);
@@ -515,16 +540,28 @@ export default function DashboardPage() {
 
       {tab === 'stats' ? (
         <>
-        <PostmasterCard />
         <DashboardStats
           data={stats}
           loading={loadingStats}
           origenDia={origenDia}
+          desdeDia={desdeDia}
+          hastaDia={hastaDia}
           onOrigenDiaChange={(value) => {
             setOrigenDia(value);
-            void loadStats(value);
+            void loadStats({ origenDia: value });
+          }}
+          onRangoDiaChange={(desde, hasta) => {
+            const inicial = !desde && !hasta ? rangoSerieInicial() : null;
+            const nextDesde = inicial?.desde ?? desde;
+            const nextHasta = inicial?.hasta ?? hasta;
+            setDesdeDia(nextDesde);
+            setHastaDia(nextHasta);
+            void loadStats({ desdeDia: nextDesde, hastaDia: nextHasta });
           }}
         />
+        <div style={{ marginTop: '1rem' }}>
+          <PostmasterCard />
+        </div>
         </>
       ) : (
         <>
@@ -559,29 +596,29 @@ export default function DashboardPage() {
           <div className="actions" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
             <button
               type="button"
-              className={`btn secondary${estado === '' ? '' : ''}`}
-              onClick={() => filterByEstado('')}
+              className={`btn secondary${filtroRapido === '' && estado === '' ? ' active' : ''}`}
+              onClick={() => aplicarFiltroRapido('')}
             >
               Todos
             </button>
             <button
               type="button"
-              className="btn secondary"
-              onClick={() => filterByEstado('entregado')}
+              className={`btn secondary${filtroRapido === 'llego' ? ' active' : ''}`}
+              onClick={() => aplicarFiltroRapido('llego')}
             >
               Solo llegaron
             </button>
             <button
               type="button"
-              className="btn secondary"
-              onClick={() => filterByEstado('abierto')}
+              className={`btn secondary${filtroRapido === 'abrio' ? ' active' : ''}`}
+              onClick={() => aplicarFiltroRapido('abrio')}
             >
               Solo abiertos
             </button>
             <button
               type="button"
-              className="btn secondary"
-              onClick={() => filterByEstado('enviado')}
+              className={`btn secondary${filtroRapido === 'enviado' ? ' active' : ''}`}
+              onClick={() => aplicarFiltroRapido('enviado')}
             >
               Solo enviados (sin tracking)
             </button>
@@ -637,28 +674,26 @@ export default function DashboardPage() {
                         <td>
                           <span
                             className={`badge ${
-                              row.rebotado
-                                ? 'error'
-                                : row.llego
-                                  ? 'entregado'
-                                  : 'enviado'
+                              row.rebotado ? 'error' : row.llego ? 'entregado' : 'pendiente'
                             }`}
                           >
-                            {row.rebotado
-                              ? 'Rebotó'
-                              : row.llego
-                                ? 'Sí'
-                                : 'Sin dato'}
+                            {row.rebotado ? 'Rebotó' : row.llego ? 'Sí' : 'Sin dato'}
                           </span>
+                          {row.llego && row.fechaEntrega ? (
+                            <div className="muted" style={{ fontSize: '0.75rem', marginTop: 2 }}>
+                              {formatFecha(row.fechaEntrega)}
+                            </div>
+                          ) : null}
                         </td>
                         <td>
-                          <span
-                            className={`badge ${
-                              row.abrio ? 'abierto' : 'enviado'
-                            }`}
-                          >
+                          <span className={`badge ${row.abrio ? 'abierto' : 'pendiente'}`}>
                             {row.abrio ? 'Sí' : 'Sin dato'}
                           </span>
+                          {row.abrio && row.fechaApertura ? (
+                            <div className="muted" style={{ fontSize: '0.75rem', marginTop: 2 }}>
+                              {formatFecha(row.fechaApertura)}
+                            </div>
+                          ) : null}
                         </td>
                       </tr>
                     ))}

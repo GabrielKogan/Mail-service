@@ -5,13 +5,12 @@ import { RetryableSendError } from '@/lib/mail/send-job';
 import { poll, type Poller } from '@/lib/queue/sqs';
 import { handleEventMessage, UnmatchedEventError } from './events';
 import { drainSendDlq, reconcileOnce } from './reconciler';
-import { syncPostmaster } from '@/lib/google/sync';
+import { POSTMASTER_CHECK_MS, syncPostmasterIfDue } from '@/lib/google/schedule';
 import { handleSendMessage, sendRetryDelaySeconds } from './send';
 
 const HEARTBEAT_MS = 30_000;
 const RECONCILE_MS = 60_000;
 const DLQ_MS = 5 * 60_000;
-const POSTMASTER_MS = 6 * 60 * 60_000;
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
 function every(ms: number, name: string, fn: () => Promise<unknown>): NodeJS.Timeout {
@@ -91,8 +90,9 @@ async function main(): Promise<void> {
       const n = await drainSendDlq();
       if (n) console.warn(`[worker:dlq] ${n} envío(s) marcados como error`);
     }),
-    every(POSTMASTER_MS, 'postmaster', async () => {
-      const r = await syncPostmaster();
+    every(POSTMASTER_CHECK_MS, 'postmaster', async () => {
+      const r = await syncPostmasterIfDue();
+      if (r.omitido) return;
       if (!r.ok && r.motivo !== 'Sin conexión con Google') {
         console.warn('[worker:postmaster]', r);
       } else if (r.ok && (r.dias || r.alertas.length)) {

@@ -1,5 +1,6 @@
 'use client';
 
+import { FormEvent, useEffect, useState, type ReactNode } from 'react';
 import {
   Bar,
   BarChart,
@@ -32,13 +33,14 @@ export type StatsData = {
   porEstado: { estado: string; cantidad: number; porcentaje?: number }[];
   porOrigen: { origen: string; cantidad: number; porcentaje?: number }[];
   porTipo?: { tipo: string; cantidad: number; porcentaje?: number }[];
+  porServicio?: { servicio: string; cantidad: number; porcentaje?: number }[];
   porDia: Record<string, string | number>[];
   estadosSerie?: string[];
   origenDia?: string;
   rango: {
     desde: string | null;
     hasta: string | null;
-    serieDiariaDefault30d?: boolean;
+    serieDiariaDefault15d?: boolean;
     kpisFiltrados?: boolean;
   };
   tracking?: {
@@ -59,6 +61,13 @@ const ESTADO_COLORS: Record<string, string> = {
   suprimido: '#6b7280',
 };
 
+const SERVICIO_COLORS: Record<string, string> = {
+  Gmail: '#c45c26',
+  Hotmail: '#1a6b8a',
+  Yahoo: '#6b4c9a',
+  Otros: '#5c6b63',
+};
+
 const ORIGEN_PALETTE = [
   '#228F8D',
   '#1a6b8a',
@@ -75,7 +84,25 @@ type Props = {
   loading: boolean;
   origenDia: string;
   onOrigenDiaChange: (origen: string) => void;
+  desdeDia: string;
+  hastaDia: string;
+  onRangoDiaChange: (desde: string, hasta: string) => void;
 };
+
+function TablaColapsable({
+  etiqueta,
+  children,
+}: {
+  etiqueta: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="stats-detalle">
+      <summary>{etiqueta}</summary>
+      <div className="table-wrap stats-mini-table">{children}</div>
+    </details>
+  );
+}
 
 function pctOf(n: number, total: number): string {
   if (total <= 0) return '0%';
@@ -87,7 +114,29 @@ export function DashboardStats({
   loading,
   origenDia,
   onOrigenDiaChange,
+  desdeDia,
+  hastaDia,
+  onRangoDiaChange,
 }: Props) {
+  const [draftDesde, setDraftDesde] = useState(desdeDia);
+  const [draftHasta, setDraftHasta] = useState(hastaDia);
+  const [rangoError, setRangoError] = useState('');
+
+  useEffect(() => {
+    setDraftDesde(desdeDia);
+    setDraftHasta(hastaDia);
+  }, [desdeDia, hastaDia]);
+
+  function buscarRango(e: FormEvent) {
+    e.preventDefault();
+    if (draftDesde && draftHasta && draftDesde > draftHasta) {
+      setRangoError('La fecha desde no puede ser posterior a hasta.');
+      return;
+    }
+    setRangoError('');
+    onRangoDiaChange(draftDesde, draftHasta);
+  }
+
   if (loading) {
     return <p className="muted">Cargando estadísticas…</p>;
   }
@@ -102,9 +151,8 @@ export function DashboardStats({
     );
   }
 
-  const { resumen, porEstado, porOrigen, porTipo = [], porDia, estadosSerie, rango, tracking } =
+  const { resumen, porEstado, porOrigen, porTipo = [], porServicio = [], porDia, estadosSerie, rango, tracking } =
     data;
-  const origenTop = porOrigen.slice(0, 10);
   const origenOptions = [
     { value: '__all__', label: 'Todos los orígenes' },
     ...porOrigen.map((o) => ({ value: o.origen, label: o.origen })),
@@ -153,8 +201,8 @@ export function DashboardStats({
       <p className="muted" style={{ marginTop: 0 }}>
         Resumen de mails enviados, estados y orígenes
         {rango.kpisFiltrados ? ' (filtros actuales)' : ''}. Serie diaria:{' '}
-        {rango.serieDiariaDefault30d
-          ? 'últimos 30 días'
+        {rango.serieDiariaDefault15d
+          ? 'últimos 15 días'
           : `${rango.desde ?? '…'} → ${rango.hasta ?? '…'}`}
         .
       </p>
@@ -235,7 +283,7 @@ export function DashboardStats({
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="table-wrap stats-mini-table">
+          <TablaColapsable etiqueta={`Ver registros (${porEstado.length})`}>
             <table>
               <thead>
                 <tr>
@@ -273,45 +321,48 @@ export function DashboardStats({
                 </tr>
               </tbody>
             </table>
-          </div>
+          </TablaColapsable>
         </section>
 
         <section className="card stats-card">
-          <h2 className="stats-card-title">Origen de los mails — cantidad</h2>
+          <h2 className="stats-card-title">Origen de los mails — cantidad y %</h2>
           <div className="stats-chart">
             <ResponsiveContainer width="100%" height={260}>
-              <BarChart
-                data={origenTop}
-                layout="vertical"
-                margin={{ left: 8, right: 36, top: 8, bottom: 8 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#d5e4e3" />
-                <XAxis type="number" allowDecimals={false} />
-                <YAxis
-                  type="category"
-                  dataKey="origen"
-                  width={110}
-                  tick={{ fontSize: 12 }}
-                />
-                <Tooltip
-                  formatter={(value) => [
-                    `${typeof value === 'number' ? value : Number(value)} mails`,
-                    'Cantidad',
-                  ]}
-                />
-                <Bar dataKey="cantidad" name="Mails" radius={[0, 4, 4, 0]}>
-                  {origenTop.map((entry, i) => (
+              <PieChart>
+                <Pie
+                  data={porOrigen}
+                  dataKey="cantidad"
+                  nameKey="origen"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={88}
+                  innerRadius={42}
+                  paddingAngle={2}
+                  label={(props) => {
+                    const name = String(props.name ?? '');
+                    const value = Number(props.value ?? 0);
+                    const pct = ((props.percent ?? 0) * 100).toFixed(0);
+                    return `${name}: ${value} (${pct}%)`;
+                  }}
+                >
+                  {porOrigen.map((entry, i) => (
                     <Cell
                       key={entry.origen}
                       fill={ORIGEN_PALETTE[i % ORIGEN_PALETTE.length]}
                     />
                   ))}
-                  <LabelList dataKey="cantidad" position="right" />
-                </Bar>
-              </BarChart>
+                </Pie>
+                <Tooltip
+                  formatter={(value, name) => [
+                    `${typeof value === 'number' ? value : Number(value)} mails`,
+                    String(name),
+                  ]}
+                />
+                <Legend />
+              </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="table-wrap stats-mini-table">
+          <TablaColapsable etiqueta={`Ver registros (${porOrigen.length})`}>
             <table>
               <thead>
                 <tr>
@@ -345,8 +396,88 @@ export function DashboardStats({
                 </tr>
               </tbody>
             </table>
-          </div>
+          </TablaColapsable>
         </section>
+
+        {porServicio.length ? (
+          <section className="card stats-card">
+            <h2 className="stats-card-title">Servicio de correo del destinatario</h2>
+            <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.85rem' }}>
+              Hotmail incluye Outlook, Live y MSN. Los dominios institucionales y el resto van en Otros.
+            </p>
+            <div className="stats-chart">
+              <ResponsiveContainer width="100%" height={260}>
+                <PieChart>
+                  <Pie
+                    data={porServicio}
+                    dataKey="cantidad"
+                    nameKey="servicio"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={88}
+                    innerRadius={42}
+                    paddingAngle={2}
+                    label={(props) => {
+                      const name = String(props.name ?? '');
+                      const value = Number(props.value ?? 0);
+                      const pct = ((props.percent ?? 0) * 100).toFixed(0);
+                      return `${name}: ${value} (${pct}%)`;
+                    }}
+                  >
+                    {porServicio.map((entry) => (
+                      <Cell
+                        key={entry.servicio}
+                        fill={SERVICIO_COLORS[entry.servicio] ?? '#5c6b63'}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value, name) => [
+                      `${typeof value === 'number' ? value : Number(value)} mails`,
+                      String(name),
+                    ]}
+                  />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <TablaColapsable etiqueta={`Ver registros (${porServicio.length})`}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Servicio</th>
+                    <th>Cantidad</th>
+                    <th>%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {porServicio.map((row) => (
+                    <tr key={row.servicio}>
+                      <td>{row.servicio}</td>
+                      <td>{row.cantidad}</td>
+                      <td>
+                        {row.porcentaje ??
+                          Math.round((row.cantidad / resumen.total) * 1000) / 10}
+                        %
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td>
+                      <strong>Total</strong>
+                    </td>
+                    <td>
+                      <strong>{resumen.total}</strong>
+                    </td>
+                    <td>
+                      <strong>100%</strong>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </TablaColapsable>
+          </section>
+        ) : null}
 
         {porTipo.length ? (
           <section className="card">
@@ -379,6 +510,8 @@ export function DashboardStats({
             <h2 className="stats-card-title">
               Mails por día (total + estados)
             </h2>
+          </div>
+          <form className="stats-dia-filtros" onSubmit={buscarRango}>
             <label className="stats-inline-filter">
               Origen
               <select
@@ -392,12 +525,35 @@ export function DashboardStats({
                 ))}
               </select>
             </label>
-          </div>
+            <label className="stats-inline-filter">
+              Desde
+              <input
+                type="date"
+                value={draftDesde}
+                onChange={(e) => setDraftDesde(e.target.value)}
+              />
+            </label>
+            <label className="stats-inline-filter">
+              Hasta
+              <input
+                type="date"
+                value={draftHasta}
+                onChange={(e) => setDraftHasta(e.target.value)}
+              />
+            </label>
+            <button className="btn secondary" type="submit">
+              Buscar
+            </button>
+          </form>
+          {rangoError ? <div className="alert error">{rangoError}</div> : null}
           <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.85rem' }}>
-            Barras apiladas por estado y línea de total. Filtro de origen solo
-            para este gráfico
-            {origenDia !== '__all__' ? ` (${origenDia})` : ''}. Envíos en
-            serie: <strong>{totalSerie}</strong>.
+            Barras apiladas por estado y línea de total. Origen y fechas aplican
+            solo a este gráfico
+            {origenDia !== '__all__' ? ` (${origenDia})` : ''}. Rango:{' '}
+            <strong>
+              {rango.desde ?? '…'} → {rango.hasta ?? '…'}
+            </strong>
+            . Envíos en serie: <strong>{totalSerie}</strong>.
           </p>
           <div className="stats-chart">
             {porDia.length === 0 ? (
@@ -463,7 +619,7 @@ export function DashboardStats({
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-              <div className="table-wrap stats-mini-table">
+              <TablaColapsable etiqueta={`Ver registros (${porDia.length})`}>
                 <table>
                   <thead>
                     <tr>
@@ -488,7 +644,7 @@ export function DashboardStats({
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TablaColapsable>
             </>
           ) : null}
         </section>

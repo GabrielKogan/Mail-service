@@ -45,6 +45,44 @@ export function buildMailLogWhere(
   return where;
 }
 
+/** Filtros de Registro que no dependen solo del estado actual. */
+export function trackingListWhere(flags: {
+  llego?: boolean;
+  abrio?: boolean;
+}): Prisma.MailLogWhereInput | null {
+  const parts: Prisma.MailLogWhereInput[] = [];
+  if (flags.llego) {
+    parts.push({
+      AND: [
+        {
+          OR: [
+            { estadoActual: { in: ['entregado', 'abierto'] } },
+            { mail_log_eventos: { some: { evento: 'entrega' } } },
+          ],
+        },
+        {
+          NOT: {
+            OR: [
+              { estadoActual: 'rebotado' },
+              { mail_log_eventos: { some: { evento: 'rebote' } } },
+            ],
+          },
+        },
+      ],
+    });
+  }
+  if (flags.abrio) {
+    parts.push({
+      OR: [
+        { estadoActual: 'abierto' },
+        { mail_log_eventos: { some: { evento: 'apertura' } } },
+      ],
+    });
+  }
+  if (!parts.length) return null;
+  return parts.length === 1 ? parts[0] : { AND: parts };
+}
+
 export function filtersFromSearchParams(
   searchParams: URLSearchParams
 ): DashboardFilters {

@@ -112,20 +112,39 @@ Tipos: `turno_confirmacion`, `turno_recordatorio` (solo `turnos`), `expediente_a
 | `nombre` | opcional; lo usa el saludo de la plantilla |
 | `idempotency_key` | recomendado: único por mail lógico, `^[A-Za-z0-9._:-]+$`, hasta 200 |
 | `origen` | opcional; si se manda distinto al de la clave, 403 |
-| `adjuntos` | hasta 5, 4 MB c/u y 10 MB en total: PDF, DOC, DOCX, PNG, JPG, GIF, WEBP |
+| `adjuntos` | hasta 15, 20 MB c/u y 28 MB en total: PDF, DOC, DOCX, PNG, JPG, GIF, WEBP |
+
+Toda respuesta incluye `ok`, `codigo` y `log`. `log` es una frase para guardar en el sistema
+cliente (destinatario, id, archivos y el límite que se pasó). No trae el base64 ni el cuerpo.
 
 | Respuesta | Significado |
 | --- | --- |
-| **200** | Enviado (`MAIL_SEND_MODE=sync`): `{ ok, id, messageId }` |
-| **202** | En cola (`MAIL_SEND_MODE=queue`): `{ ok, id, estado: "en_cola" }` |
-| 200/202 con `duplicado: true` | Misma `idempotency_key` y mismo contenido: se devuelve el envío original, no se reenvía |
-| **401** | Sin clave o clave inválida/revocada |
-| **403** | `origen` distinto al de la clave, HTML libre no permitido, o plantilla de otro sistema |
-| **409** | Misma `idempotency_key` con otro contenido (error de integración) |
-| **422** | Destinatario suprimido (definitivo: no reintentar) |
-| **502** | El proveedor rechazó o falló (modo sync) |
+| **200** | Enviado (`MAIL_SEND_MODE=sync`): `{ ok, codigo: "enviado", id, estado, messageId, log }` |
+| **202** | En cola (`MAIL_SEND_MODE=queue`): `{ ok, codigo: "encolado", id, estado: "en_cola", log }` |
+| 200/202 con `duplicado: true` | Misma `idempotency_key` y mismo contenido: `codigo: "duplicado"`, no se reenvía |
+| **400** | `json_invalido`, `datos_invalidos`, `plantilla_inexistente`, `plantilla_invalida`, o un adjunto: `tipo_adjunto_no_permitido`, `nombre_archivo_invalido`, `adjunto_vacio`, `adjunto_demasiado_grande`, `demasiados_adjuntos`, `adjuntos_total_excedido`. Si fallan varios archivos, `codigo` es el de mayor prioridad y `log` nombra todos |
+| **401** | `no_autorizado`: sin clave o clave inválida/revocada |
+| **403** | `origen_no_coincide`, `html_libre_no_permitido` o `plantilla_no_permitida` |
+| **409** | `idempotencia_conflicto`: misma clave, otro contenido |
+| **422** | `destinatario_suprimido` (definitivo: no reintentar) o `plantilla_no_permitida` |
+| **500** | `registro_fallido` |
+| **502** | `envio_fallido`: el proveedor rechazó o falló (modo sync). El `log` repite el detalle |
 
 Reintentos: ante un timeout o un 5xx, reintentar **con la misma** `idempotency_key`.
+
+### `GET /api/sistemas/:id/stats`
+
+Con la clave de ese sistema (`x-api-key`). El `:id` es el id numérico del sistema: la clave del sistema 1 solo recibe las estadísticas del sistema 1. Otro id responde `403` (`sistema_no_coincide`). El token de administración puede consultar cualquier id.
+
+Filtros opcionales: `desde`, `hasta`, `estado`, `tipo`, `q`. Un `origen` en la query no amplía el resultado.
+
+```json
+{ "ok": true, "codigo": "estadisticas", "log": "Estadísticas del sistema 1 (turnos): 42 envíos.",
+  "sistema": { "id": 1, "nombre": "Turnos", "origen": "turnos" },
+  "total": 42, "resumen": {}, "porEstado": [], "porTipo": [], "porDia": [] }
+```
+
+`resumen` trae total, ok, error, entregados, abiertos y tasa de apertura. Sin fechas, los KPIs son históricos y la serie diaria son los últimos 15 días. En el dashboard, el gráfico diario tiene su propio rango (`desdeDia` y `hastaDia`).
 
 ### `GET /api/mail/:id`
 
@@ -231,8 +250,9 @@ lo publica en `mail-send` y responde 202. El worker (`worker/index.ts`):
   pasa a `revisar` lo trabado en `enviando` y borra adjuntos de más de 7 días;
 - cada 5 min vacía `mail-send-dlq` marcando esos envíos como `error`;
 - actualiza `mail_worker_heartbeat` cada 30 s (el dashboard avisa si deja de latir);
-- cada 6 h sincroniza Google Postmaster Tools (si hay cuenta conectada). Sin worker,
-  usar **Sincronizar ahora** en `/sistemas`.
+- revisa Google Postmaster Tools cada 15 min y sincroniza si la última pasada
+  exitosa ya cumplió 6 h (y hay cuenta conectada). El proceso web hace lo mismo
+  solo, también al conectar la cuenta. **Sincronizar ahora** en `/sistemas` la adelanta.
 
 Con `MAIL_SEND_MODE=sync` (default) se envía en el momento con la misma lógica, sin reintentos.
 

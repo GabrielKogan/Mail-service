@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { logDuplicado, logIdempotenciaConflicto, logSuprimido } from '@/lib/mail/client-log';
 
 type Adjuntos = { filename: string; contentType: string; contentBase64: string }[];
 
@@ -80,8 +81,11 @@ export function replyForExisting(existing: IdempotentRecord, requestHash: string
     return {
       status: 409,
       body: {
+        ok: false,
+        codigo: 'idempotencia_conflicto',
         error: 'Clave de idempotencia reutilizada con otro contenido',
         id: existing.id,
+        log: logIdempotenciaConflicto(existing.id),
       },
     };
   }
@@ -90,10 +94,13 @@ export function replyForExisting(existing: IdempotentRecord, requestHash: string
     return {
       status: 422,
       body: {
+        ok: false,
+        codigo: 'destinatario_suprimido',
         error: 'Destinatario en lista de supresión',
         detalle: existing.errorDetalle,
         id: existing.id,
         duplicado: true,
+        log: logSuprimido({ id: existing.id, detalle: existing.errorDetalle }),
       },
     };
   }
@@ -104,10 +111,12 @@ export function replyForExisting(existing: IdempotentRecord, requestHash: string
     status: pendiente ? 202 : 200,
     body: {
       ok: true,
+      codigo: 'duplicado',
       id: existing.id,
       estado: existing.estadoActual,
       messageId: provisional ? null : existing.messageId,
       duplicado: true,
+      log: logDuplicado(existing.id, existing.estadoActual),
     },
   };
 }

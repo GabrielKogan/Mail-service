@@ -16,22 +16,26 @@ export {
 
 const adjuntoSchema = z
   .object({
-    filename: z
-      .string()
-      .min(1)
-      .max(200)
-      .refine((name) => !/[\\/]/.test(name), 'Nombre de archivo inválido'),
+    filename: z.string().min(1).max(200),
     contentType: z.string().min(1).max(120),
     contentBase64: z.string().min(1),
   })
   .superRefine((val, ctx) => {
+    if (/[\\/]/.test(val.filename)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Nombre de archivo inválido',
+        path: ['filename'],
+        params: { codigo: 'nombre_archivo_invalido', archivo: val.filename },
+      });
+    }
     if (!isAllowedAttachment(val.filename, val.contentType)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `Tipo no permitido: ${val.filename}. Usá PDF, DOC, DOCX, PNG, JPG, GIF o WEBP.`,
         path: ['filename'],
+        params: { codigo: 'tipo_adjunto_no_permitido', archivo: val.filename },
       });
-      return;
     }
     const bytes = base64ByteLength(val.contentBase64);
     if (bytes <= 0) {
@@ -39,12 +43,19 @@ const adjuntoSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Archivo vacío',
         path: ['contentBase64'],
+        params: { codigo: 'adjunto_vacio', archivo: val.filename },
       });
     } else if (bytes > MAX_ATTACHMENT_BYTES) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `Cada archivo puede pesar hasta ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB`,
         path: ['contentBase64'],
+        params: {
+          codigo: 'adjunto_demasiado_grande',
+          archivo: val.filename,
+          bytes,
+          maxBytes: MAX_ATTACHMENT_BYTES,
+        },
       });
     }
   });
@@ -80,7 +91,11 @@ export const enviarMailSchema = z
       .max(200)
       .regex(/^[A-Za-z0-9._:-]+$/, 'Solo letras, números y . _ : -')
       .optional(),
-    adjuntos: z.array(adjuntoSchema).max(MAX_ATTACHMENTS).optional().default([]),
+    adjuntos: z
+      .array(adjuntoSchema)
+      .max(MAX_ATTACHMENTS, `Se pueden adjuntar hasta ${MAX_ATTACHMENTS} archivos`)
+      .optional()
+      .default([]),
   })
   .superRefine((val, ctx) => {
     const libre = val.asunto !== undefined || val.cuerpo !== undefined;
@@ -112,6 +127,11 @@ export const enviarMailSchema = z
         code: z.ZodIssueCode.custom,
         message: `El total de adjuntos no puede superar ${MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB`,
         path: ['adjuntos'],
+        params: {
+          codigo: 'adjuntos_total_excedido',
+          bytes: total,
+          maxBytes: MAX_ATTACHMENTS_TOTAL_BYTES,
+        },
       });
     }
   });

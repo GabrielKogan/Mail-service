@@ -6,17 +6,26 @@ import {
   ALLOWED_ATTACHMENT_EXTENSIONS,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS,
+  MAX_ATTACHMENTS_TOTAL_BYTES,
 } from '@/lib/attachment-limits';
 
 type SendOk = {
   ok: true;
+  codigo?: string;
+  log?: string;
   id: number;
   messageId?: string | null;
   estado?: string;
   duplicado?: boolean;
   adjuntos?: string[];
 };
-type SendErr = { error: string; detalle?: string | Record<string, unknown> };
+type SendErr = {
+  ok?: false;
+  codigo?: string;
+  log?: string;
+  error: string;
+  detalle?: string | Record<string, unknown>;
+};
 
 type AdjuntoPayload = {
   filename: string;
@@ -172,11 +181,19 @@ export default function EnviarPage() {
     setOk(null);
     setLoading(true);
     try {
+      let total = 0;
       for (const f of files) {
         if (f.size > MAX_ATTACHMENT_BYTES) {
           setError(`"${f.name}" supera ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB`);
           return;
         }
+        total += f.size;
+      }
+      if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+        setError(
+          `El total de adjuntos no puede superar ${MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB`
+        );
+        return;
       }
       const adjuntos = await Promise.all(files.map(fileToAdjunto));
       const payload =
@@ -196,14 +213,15 @@ export default function EnviarPage() {
         return;
       }
       if (!res.ok) {
-        const message = 'error' in parsed ? parsed.error : 'No se pudo enviar el mail';
-        const detalle = 'detalle' in parsed ? parsed.detalle : undefined;
+        const err = parsed as SendErr;
+        if (err.log) {
+          setError(err.log);
+          return;
+        }
+        const message = err.error || 'No se pudo enviar el mail';
+        const detalle = err.detalle;
         const extra =
-          typeof detalle === 'string'
-            ? detalle
-            : detalle
-              ? JSON.stringify(detalle)
-              : '';
+          typeof detalle === 'string' ? detalle : detalle ? JSON.stringify(detalle) : '';
         setError(extra ? `${message}: ${extra}` : message);
         return;
       }
@@ -223,8 +241,9 @@ export default function EnviarPage() {
         <p className="muted">
           Usa el mismo endpoint que los sistemas internos. Elegí una plantilla
           (tipo + data) o, si el sistema lo permite, HTML libre. Adjuntá PDF,
-          DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos y{' '}
-          {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB c/u. Si no elegís sistema,
+          DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos,{' '}
+          {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB cada uno y{' '}
+          {MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB en total. Si no elegís sistema,
           el origen queda como <code>panel</code>.
         </p>
       </header>
@@ -396,12 +415,18 @@ export default function EnviarPage() {
         {error ? <div className="alert error">{error}</div> : null}
         {ok ? (
           <div className="alert ok">
-            {ok.duplicado
-              ? `Ya existía un envío con esa clave (id ${ok.id})`
-              : ok.estado === 'en_cola'
-                ? `Mail encolado (id ${ok.id}); el worker lo envía en segundos`
-                : `SES aceptó el mail (id ${ok.id} — ${ok.messageId})`}
-            {ok.adjuntos?.length ? ` · adjuntos: ${ok.adjuntos.join(', ')}` : ''}.
+            {ok.log ? (
+              ok.log
+            ) : (
+              <>
+                {ok.duplicado
+                  ? `Ya existía un envío con esa clave (id ${ok.id})`
+                  : ok.estado === 'en_cola'
+                    ? `Mail encolado (id ${ok.id}); el worker lo envía en segundos`
+                    : `SES aceptó el mail (id ${ok.id} — ${ok.messageId})`}
+                {ok.adjuntos?.length ? ` · adjuntos: ${ok.adjuntos.join(', ')}` : ''}.
+              </>
+            )}{' '}
             Revisá spam si no aparece.
           </div>
         ) : null}

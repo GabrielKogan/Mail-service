@@ -5,6 +5,7 @@ import { corsPreflight, jsonWithCors } from '@/lib/cors';
 import {
   buildMailLogWhere,
   filtersFromSearchParams,
+  trackingListWhere,
 } from '@/lib/dashboard-query';
 import { trackingConfig } from '@/lib/mail/tracking';
 import { config } from '@/lib/config';
@@ -23,7 +24,13 @@ export async function GET(req: NextRequest) {
   const filters = filtersFromSearchParams(searchParams);
   const page = Math.max(1, Number(searchParams.get('page') ?? '1') || 1);
   const pageSize = 25;
-  const where = buildMailLogWhere(filters);
+  const tracking = trackingListWhere({
+    llego: searchParams.get('llego') === '1',
+    abrio: searchParams.get('abrio') === '1',
+  });
+  const where = tracking
+    ? { AND: [buildMailLogWhere(filters), tracking] }
+    : buildMailLogWhere(filters);
 
   const [rows, total] = await Promise.all([
     prisma.mailLog.findMany({

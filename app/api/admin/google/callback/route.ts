@@ -10,6 +10,7 @@ import {
   exchangeCode,
   verifyOAuthState,
 } from '@/lib/google/oauth';
+import { resetGoogleAccessCache, syncPostmaster } from '@/lib/google/sync';
 
 export const runtime = 'nodejs';
 
@@ -44,13 +45,15 @@ export async function GET(req: NextRequest) {
         data: {
           email: tokens.email || 'desconocido',
           refreshTokenEnc: enc,
-          scopes: GOOGLE_SCOPES,
+          scopes: (tokens.scopes || GOOGLE_SCOPES).slice(0, 500),
           estado: 'activa',
           ultimoError: null,
           alertadoVencida: null,
         },
       });
     });
+    resetGoogleAccessCache();
+    await syncPostmaster().catch((err) => console.error('[postmaster] sync al conectar', err));
     return redirectToSistemas('google=ok');
   } catch (e) {
     const detalle = e instanceof Error ? e.message : String(e);

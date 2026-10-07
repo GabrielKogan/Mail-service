@@ -5,8 +5,10 @@ Son datos agregados, con unas 48 h de demora, sin detalle por destinatario. Los
 días de poco volumen no aparecen. La API v1 (`trafficStats`) no expone el
 Feedback Loop por `Feedback-ID`: eso se mira en la web de Postmaster.
 
-El `scope` `postmaster.readonly` no suele exigir verificación de la app. Si
-Google la pide al publicar, completar el formulario de verificación.
+Los scopes de lectura (`postmaster.domain` y `postmaster.traffic.readonly`) no
+suelen exigir verificación de la app. Si Google la pide al publicar, completar
+el formulario de verificación. El scope viejo `postmaster.readonly` ya no
+alcanza: Google responde «insufficient authentication scopes».
 
 ## 1. Verificar el dominio en Postmaster
 
@@ -26,7 +28,10 @@ Google la pide al publicar, completar el formulario de verificación.
 3. Credenciales → **ID de cliente OAuth** → tipo **Aplicación web**.
 4. URI de redirección: `${APP_BASE_URL}/api/admin/google/callback`
    (`APP_BASE_URL` tiene que ser `https`, salvo `localhost`).
-5. Scopes: `https://www.googleapis.com/auth/postmaster.readonly`, `openid`, `email`.
+5. Scopes (hay que cargarlos en la pantalla de consentimiento):
+   `https://www.googleapis.com/auth/postmaster.domain`,
+   `https://www.googleapis.com/auth/postmaster.traffic.readonly`,
+   `openid`, `email`.
 
 ## 3. Variables
 
@@ -48,8 +53,11 @@ tiene que tener 32+ caracteres y ser distinto de los demás secretos.
 En `/sistemas` → **Conectar con Google**, autorizar con la misma cuenta que
 verificó el dominio. El refresh token se guarda cifrado (AES-256-GCM).
 
-- **Sincronizar ahora** corre la misma función que el worker (últimos 14 días).
-- El worker la corre cada 6 h. Sin worker (`MAIL_SEND_MODE=sync`) hay que
-  sincronizar a mano.
+- Al conectar la cuenta se sincroniza en el momento (últimos 14 días).
+- El proceso web la vuelve a correr solo: una vez al arrancar y después cada
+  15 min revisa si la última pasada exitosa ya cumplió 6 h. No hace falta el
+  botón ni tener el worker levantado.
+- El worker hace la misma revisión. Si el web ya sincronizó, se la salta.
+- **Sincronizar ahora** fuerza una pasada sin esperar esas 6 h.
 - Si Google responde `invalid_grant`, la conexión se marca vencida y se manda
   una sola alerta a `ALERTAS_EMAIL`.

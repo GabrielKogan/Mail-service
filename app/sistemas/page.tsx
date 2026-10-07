@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/client/token';
+import NewSystemModal from '@/components/NewSystemModal';
+import { esErrorScopePostmaster, mensajeErrorPostmaster } from '@/lib/google/scopes';
 
 type ApiKey = {
   id: number;
@@ -325,6 +327,8 @@ function GooglePostmasterCard() {
   }
 
   const vencida = estado?.estado === 'vencida';
+  const sinPermiso = esErrorScopePostmaster(estado?.ultimoError);
+  const errorSync = estado?.ultimoError ? mensajeErrorPostmaster(estado.ultimoError) : '';
 
   return (
     <section className="card" style={{ marginBottom: '1rem' }}>
@@ -340,9 +344,9 @@ function GooglePostmasterCard() {
       {estado?.conectado ? (
         <p>
           Conectado como <strong>{estado.email}</strong>
-          {vencida ? (
+          {vencida || sinPermiso ? (
             <span className="badge error" style={{ marginLeft: 8 }}>
-              vencida
+              {sinPermiso ? 'sin permiso' : 'vencida'}
             </span>
           ) : (
             <span className="badge enviado" style={{ marginLeft: 8 }}>
@@ -352,15 +356,33 @@ function GooglePostmasterCard() {
           <br />
           <span className="muted">
             Última sincronización: {formatFecha(estado.ultimaSync ?? null)}
-            {estado.ultimoError ? ` · ${estado.ultimoError}` : ''}
+            {errorSync ? ` · ${errorSync}` : ''}
+            {!vencida && !sinPermiso ? (
+              <>
+                <br />
+                Se actualiza sola cada 6 horas. «Sincronizar ahora» la adelanta.
+              </>
+            ) : null}
           </span>
         </p>
       ) : null}
-      {mensaje ? <div className={`alert ${mensaje.startsWith('No') || mensaje.includes('error') || mensaje.includes('venc') ? 'error' : 'ok'}`}>{mensaje}</div> : null}
+      {mensaje ? (
+        <div
+          className={`alert ${
+            mensaje.startsWith('No') ||
+            mensaje.startsWith('Error') ||
+            /error|venc|permiso de Postmaster|insufficient authentication scopes/i.test(mensaje)
+              ? 'error'
+              : 'ok'
+          }`}
+        >
+          {mensajeErrorPostmaster(mensaje)}
+        </div>
+      ) : null}
       <div className="actions">
-        {!estado?.conectado || vencida ? (
+        {!estado?.conectado || vencida || sinPermiso ? (
           <button className="btn" type="button" disabled={busy === 'conectar'} onClick={() => void conectar()}>
-            {busy === 'conectar' ? 'Redirigiendo…' : vencida ? 'Reconectar' : 'Conectar con Google'}
+            {busy === 'conectar' ? 'Redirigiendo…' : vencida || sinPermiso ? 'Reconectar' : 'Conectar con Google'}
           </button>
         ) : null}
         {estado?.conectado ? (
@@ -388,6 +410,8 @@ export default function SistemasPage() {
   const [edit, setEdit] = useState<EditState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [newKey, setNewKey] = useState<{ sistema: string; key: string } | null>(null);
+  const [generatedKeys, setGeneratedKeys] = useState<Record<number, string>>({});
+  const [showNewModal, setShowNewModal] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -473,7 +497,7 @@ export default function SistemasPage() {
     }
   }
 
-  async function generateKey(s: Sistema) {
+  async function generateKey(s: Sistema): Promise<string | null> {
     setBusy(`key-${s.id}`);
     setError('');
     setNewKey(null);
@@ -481,16 +505,27 @@ export default function SistemasPage() {
       const res = await apiFetch(`/api/admin/sistemas/${s.id}/keys`, { method: 'POST' });
       if (!res.ok) {
         setError(await readError(res, 'No se pudo generar la clave'));
-        return;
+        return null;
       }
-      const json = (await res.json()) as { key: string };
+      const json = (await res.json()) as { key: string; id?: number };
+      if (json.id) setGeneratedKeys((p) => ({ ...p, [json.id as number]: json.key }));
       setNewKey({ sistema: s.nombre, key: json.key });
       await load();
+      return json.key;
     } catch {
       setError('Error de red al generar la clave.');
+      return null;
     } finally {
       setBusy(null);
     }
+  }
+
+  function handleModalCreated(k: { sistema: string; key: string }) {
+    setNewKey(k);
+    // if modal returned keyId include it in generatedKeys map
+    const asAny = k as unknown as { keyId?: number };
+    if (asAny.keyId) setGeneratedKeys((p) => ({ ...p, [asAny.keyId as number]: k.key }));
+    void load();
   }
 
   async function revokeKey(s: Sistema, k: ApiKey) {
@@ -525,6 +560,11 @@ export default function SistemasPage() {
           baja; los de suscripción sí. Para rotar una clave: generá una nueva,
           cambiala en el sistema y después revocá la anterior.
         </p>
+        <div style={{ marginTop: 8 }}>
+          <button className="btn" type="button" onClick={() => setShowNewModal(true)}>
+            Crear sistema + generar clave
+          </button>
+        </div>
       </header>
 
       {error ? <div className="alert error">{error}</div> : null}
@@ -552,229 +592,107 @@ export default function SistemasPage() {
         </div>
       ) : null}
 
+      {showNewModal ? (
+        <NewSystemModal onClose={() => setShowNewModal(false)} onCreated={(k) => handleModalCreated(k)} />
+      ) : null}
+
       <SesEstadoCard />
       <GooglePostmasterCard />
 
       {loading && !sistemas ? <p className="muted">Cargando…</p> : null}
 
-      {sistemas?.map((s) => (
-        <section key={s.id} className="card" style={{ marginBottom: '1rem' }}>
-          <div className="card-title" style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
-            <span>
-              {s.nombre} <span className="muted">({s.origen})</span>
-            </span>
-            <span>
-              <span className={`badge ${s.clasificacion === 'subscription' ? 'abierto' : 'entregado'}`}>
-                {clasificacionLabel(s.clasificacion)}
-              </span>{' '}
-              <span className={`badge ${s.activo ? 'enviado' : 'error'}`}>
-                {s.activo ? 'Activo' : 'Inactivo'}
-              </span>
-            </span>
-          </div>
-
-          {editId === s.id && edit ? (
-            <div className="form">
-              <div className="grid-2">
-                <label>
-                  Nombre
-                  <input
-                    value={edit.nombre}
-                    onChange={(e) => setEdit({ ...edit, nombre: e.target.value })}
-                  />
-                </label>
-                <label>
-                  Clasificación
-                  <select
-                    value={edit.clasificacion}
-                    onChange={(e) =>
-                      setEdit({ ...edit, clasificacion: e.target.value as Sistema['clasificacion'] })
-                    }
-                  >
-                    <option value="transactional">Transaccional</option>
-                    <option value="subscription">Suscripción</option>
-                  </select>
-                </label>
-              </div>
-              <label>
-                Orígenes CORS (separados por coma)
-                <input
-                  value={edit.corsOrigins}
-                  onChange={(e) => setEdit({ ...edit, corsOrigins: e.target.value })}
-                  placeholder="https://turnos.lujandecuyo.gob.ar"
-                />
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={edit.permiteRawHtml}
-                  onChange={(e) => setEdit({ ...edit, permiteRawHtml: e.target.checked })}
-                />{' '}
-                Permite enviar HTML libre
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={edit.activo}
-                  onChange={(e) => setEdit({ ...edit, activo: e.target.checked })}
-                />{' '}
-                Activo
-              </label>
-              <div className="actions">
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={busy === `edit-${s.id}`}
-                  onClick={() => void saveEdit(s.id)}
-                >
-                  {busy === `edit-${s.id}` ? 'Guardando…' : 'Guardar'}
-                </button>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  onClick={() => {
-                    setEditId(null);
-                    setEdit(null);
-                  }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className="muted" style={{ marginTop: 0 }}>
-              CORS: {s.corsOrigins.length ? s.corsOrigins.join(', ') : 'ninguno'} · HTML
-              libre: {s.permiteRawHtml ? 'sí' : 'no'} · alta {formatFecha(s.fechaAlta)}
-            </p>
-          )}
-
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Clave</th>
-                  <th>Alta</th>
-                  <th>Último uso</th>
-                  <th>Estado</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {s.keys.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="muted">
-                      Sin claves.
-                    </td>
-                  </tr>
-                ) : (
-                  s.keys.map((k) => {
-                    const vigente = k.activo && !k.revocadaEn;
-                    return (
-                      <tr key={k.id}>
-                        <td>
-                          <code>mls_{k.prefijo}_…</code>
-                        </td>
-                        <td>{formatFecha(k.fechaAlta)}</td>
-                        <td>{formatFecha(k.ultimoUso)}</td>
-                        <td>
-                          <span className={`badge ${vigente ? 'enviado' : 'error'}`}>
-                            {vigente ? 'Vigente' : `Revocada ${formatFecha(k.revocadaEn)}`}
-                          </span>
-                        </td>
-                        <td>
-                          {vigente ? (
+      <section className="card" style={{ marginBottom: '1rem' }}>
+        <div className="card-title">Sistemas y claves</div>
+        <p className="muted">Listado unificado con todos los sistemas y sus claves. Usa las acciones para generar o revocar claves y editar sistemas.</p>
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Sistema</th>
+                <th>Claves</th>
+                <th>Alta</th>
+                <th>Último uso</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sistemas?.map((s) => (
+                <tr key={s.id}>
+                  <td>
+                    <div style={{ fontWeight: 700 }}>{s.nombre}</div>
+                    <div className="muted">id {s.id} · {s.origen} · {s.corsOrigins.length ? s.corsOrigins.join(', ') : 'CORS: ninguno'}</div>
+                  </td>
+                  <td>
+                    {s.keys.length === 0 ? (
+                      <span className="muted">Sin claves.</span>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {s.keys.map((k) => (
+                          <div key={k.id} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                            <code style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>mls_{k.prefijo}_…</code>
                             <button
-                              className="btn secondary"
+                              className="btn secondary icon-btn"
                               type="button"
-                              disabled={busy === `revoke-${k.id}`}
-                              onClick={() => void revokeKey(s, k)}
+                              title="Copiar clave"
+                              aria-label={`Copiar clave ${k.prefijo}`}
+                              onClick={async () => {
+                                try {
+                                  // if we have the full key for this key id in memory, copy it
+                                  if (generatedKeys[k.id]) {
+                                    await navigator.clipboard?.writeText(generatedKeys[k.id]);
+                                    window.alert('Clave copiada al portapapeles.');
+                                    return;
+                                  }
+                                  // else ask user to confirm generating a new key to copy
+                                  if (!window.confirm('No es posible recuperar la clave completa. ¿Generar una nueva clave y copiarla ahora?')) return;
+                                  const full = await generateKey(s);
+                                  if (full) {
+                                    await navigator.clipboard?.writeText(full);
+                                    window.alert('Nueva clave generada y copiada al portapapeles.');
+                                  }
+                                } catch (e) {
+                                  // ignore clipboard errors
+                                }
+                              }}
                             >
-                              {busy === `revoke-${k.id}` ? '…' : 'Revocar'}
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                <path d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1z" fill="currentColor"/>
+                                <path d="M20 5H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h12v14z" fill="currentColor"/>
+                              </svg>
                             </button>
-                          ) : null}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="actions">
-            <button
-              className="btn"
-              type="button"
-              disabled={busy === `key-${s.id}`}
-              onClick={() => void generateKey(s)}
-            >
-              {busy === `key-${s.id}` ? 'Generando…' : 'Generar clave'}
-            </button>
-            {editId !== s.id ? (
-              <button className="btn secondary" type="button" onClick={() => startEdit(s)}>
-                Editar
-              </button>
-            ) : null}
-          </div>
-        </section>
-      ))}
-
-      <form className="form card" onSubmit={onCreate}>
-        <div className="card-title">Nuevo sistema</div>
-        <div className="grid-2">
-          <label>
-            Nombre
-            <input
-              required
-              value={form.nombre}
-              onChange={(e) => setForm({ ...form, nombre: e.target.value })}
-              placeholder="Turnos web"
-            />
-          </label>
-          <label>
-            Origen
-            <input
-              required
-              value={form.origen}
-              onChange={(e) => setForm({ ...form, origen: e.target.value })}
-              placeholder="turnos"
-            />
-          </label>
+                            <span className={`badge ${k.activo && !k.revocadaEn ? 'enviado' : 'error'}`} style={{ marginLeft: 8 }}>
+                              {k.activo && !k.revocadaEn ? 'Vigente' : `Revocada ${k.revocadaEn ? formatFecha(k.revocadaEn) : ''}`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td>{formatFecha(s.fechaAlta)}</td>
+                  <td>{s.keys.length ? formatFecha(s.keys[0].ultimoUso) : '—'}</td>
+                  <td>
+                    <span className={`badge ${s.activo ? 'enviado' : 'error'}`}>{s.activo ? 'Activo' : 'Inactivo'}</span>
+                  </td>
+                  <td>
+                    <div className="actions">
+                      <button className="btn" type="button" disabled={busy === `key-${s.id}`} onClick={() => void generateKey(s)}>
+                        {busy === `key-${s.id}` ? 'Generando…' : 'Generar clave'}
+                      </button>
+                      <button className="btn secondary" type="button" onClick={() => startEdit(s)} aria-label={`Editar ${s.nombre}`}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ verticalAlign: 'middle', display: 'inline-block' }} aria-hidden>
+                          <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="currentColor" />
+                          <path d="M20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <label>
-          Clasificación
-          <select
-            value={form.clasificacion}
-            onChange={(e) =>
-              setForm({ ...form, clasificacion: e.target.value as Sistema['clasificacion'] })
-            }
-          >
-            <option value="transactional">
-              Transaccional (turnos, trámites: sin enlace de baja)
-            </option>
-            <option value="subscription">Suscripción (novedades: con enlace de baja)</option>
-          </select>
-        </label>
-        <label>
-          Orígenes CORS (solo si el navegador llama directo; separados por coma)
-          <input
-            value={form.corsOrigins}
-            onChange={(e) => setForm({ ...form, corsOrigins: e.target.value })}
-            placeholder="https://turnos.lujandecuyo.gob.ar"
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={form.permiteRawHtml}
-            onChange={(e) => setForm({ ...form, permiteRawHtml: e.target.checked })}
-          />{' '}
-          Permite enviar HTML libre
-        </label>
-        <button className="btn" type="submit" disabled={saving}>
-          {saving ? 'Creando…' : 'Crear sistema'}
-        </button>
-      </form>
+      </section>
     </main>
   );
 }

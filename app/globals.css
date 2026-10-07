@@ -152,7 +152,7 @@ a:hover {
 }
 
 .page {
-  max-width: 1180px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 2rem 1.5rem 3rem;
 }
@@ -255,6 +255,42 @@ a:hover {
   margin-top: 1.15rem;
 }
 
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.section-head .card-title {
+  margin-bottom: 0;
+}
+
+.guide-steps {
+  margin: 0.2rem 0 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.guide-steps li {
+  color: var(--text);
+}
+
+.doc-table th,
+.doc-table td {
+  white-space: normal;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -304,6 +340,29 @@ a:hover {
   border-color: var(--brand-muted);
 }
 
+.btn.secondary.active {
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  border-color: var(--brand);
+}
+
+/* Icon-only button (small, used for copy/edit icons) */
+.icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0.28rem 0.32rem;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--navy);
+}
+.icon-btn:hover {
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+}
+
 .form {
   display: flex;
   flex-direction: column;
@@ -330,7 +389,8 @@ a:hover {
 .form select,
 .filters input,
 .filters select,
-.stats-inline-filter select {
+.stats-inline-filter select,
+.stats-inline-filter input {
   font: inherit;
   font-weight: 400;
   padding: 0.58rem 0.75rem;
@@ -346,7 +406,8 @@ a:hover {
 .form select:focus,
 .filters input:focus,
 .filters select:focus,
-.stats-inline-filter select:focus {
+.stats-inline-filter select:focus,
+.stats-inline-filter input:focus {
   outline: none;
   border-color: var(--brand);
   box-shadow: 0 0 0 3px rgba(34, 143, 141, 0.18);
@@ -362,6 +423,53 @@ a:hover {
   background: var(--brand-soft);
   cursor: pointer;
 }
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 12, 0.48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 1.5rem;
+}
+
+.modal {
+  width: 100%;
+  max-width: 800px;
+  border-radius: 14px;
+  padding: 1.25rem 1.25rem;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(6px);
+  animation: modal-in 180ms ease-out forwards;
+}
+
+.modal .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal .modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.modal .modal-close:hover { color: var(--text); background: rgba(0,0,0,0.03); }
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.995); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 
 .form input[type="file"]::file-selector-button {
   background: #fff;
@@ -672,6 +780,58 @@ pre.code-block {
   white-space: nowrap;
 }
 
+.stats-detalle {
+  margin-top: 0.85rem;
+}
+
+.stats-detalle summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  color: var(--brand-dark);
+  font-size: 0.85rem;
+  font-weight: 600;
+  list-style: none;
+  user-select: none;
+}
+
+.stats-detalle summary::-webkit-details-marker {
+  display: none;
+}
+
+.stats-detalle summary::before {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 2px solid var(--brand);
+  border-bottom: 2px solid var(--brand);
+  transform: rotate(-45deg);
+  margin-top: -0.15rem;
+}
+
+.stats-detalle[open] summary::before {
+  transform: rotate(45deg);
+  margin-top: 0.1rem;
+}
+
+.stats-detalle .stats-mini-table {
+  margin-top: 0.55rem;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.stats-detalle .stats-mini-table table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.stats-detalle .stats-mini-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -717,6 +877,18 @@ pre.code-block {
 
 .stats-inline-filter select {
   min-width: 160px;
+}
+
+.stats-dia-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin: 0.35rem 0 0.65rem;
+}
+
+.stats-dia-filtros .btn {
+  height: 2.45rem;
 }
 
 .stats-chart {

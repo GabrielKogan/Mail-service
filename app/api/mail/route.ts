@@ -26,6 +26,7 @@ import { clasificacionDe } from '@/lib/mail/sistemas';
 import { processSendJob, QUEUED_PREFIX } from '@/lib/mail/send-job';
 import { recordInternalEvent } from '@/lib/mail/events';
 import { enqueueSendJob } from '@/lib/queue/sqs';
+import { formatValidationFailure, logEncolado, logEnviado, logSuprimido } from '@/lib/mail/client-log';
 import { enviarMailSchema } from '@/lib/validation';
 import { authenticateMailCaller, resolveOrigin, type MailCaller } from '@/lib/auth/caller';
 import { globalCorsOrigins, jsonWithCors, mailCorsPreflight, type CorsAllowList } from '@/lib/cors';
@@ -66,28 +67,52 @@ export async function POST(req: NextRequest) {
   const reply = (body: unknown, init?: ResponseInit) => jsonWithCors(req, body, init, cors);
 
   if (!caller) {
-    return reply({ error: 'No autorizado' }, { status: 401 });
+    return reply(
+      {
+        ok: false,
+        codigo: 'no_autorizado',
+        error: 'No autorizado',
+        log: 'Rechazado: falta la clave o no es válida.',
+      },
+      { status: 401 }
+    );
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return reply({ error: 'JSON inválido' }, { status: 400 });
+    return reply(
+      {
+        ok: false,
+        codigo: 'json_invalido',
+        error: 'JSON inválido',
+        log: 'Rechazado: el cuerpo no es JSON válido.',
+      },
+      { status: 400 }
+    );
   }
 
   const parsed = enviarMailSchema.safeParse(body);
 
   if (!parsed.success) {
-    return reply(
-      { error: 'Datos inválidos', detalle: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return reply(formatValidationFailure(parsed.error), { status: 400 });
   }
 
   const resolved = await resolveOrigin(caller, parsed.data.origen);
   if (!resolved.ok) {
-    return reply({ error: resolved.error, detalle: resolved.detalle }, { status: resolved.status });
+    const codigo = resolved.status === 403 ? 'origen_no_coincide' : 'datos_invalidos';
+    const detalle = resolved.detalle ? ` ${resolved.detalle}` : '';
+    return reply(
+      {
+        ok: false,
+        codigo,
+        error: resolved.error,
+        detalle: resolved.detalle,
+        log: `Rechazado: ${resolved.error}.${detalle}`,
+      },
+      { status: resolved.status }
+    );
   }
   const { origen, sistema } = resolved;
   const { email, nombre, adjuntos } = parsed.data;
@@ -103,17 +128,30 @@ export async function POST(req: NextRequest) {
   if (parsed.data.tipo) {
     const plantilla = findPlantilla(parsed.data.tipo);
     if (!plantilla) {
+      const tipos = PLANTILLAS.map((p) => p.tipo).join(', ');
       return reply(
         {
+          ok: false,
+          codigo: 'plantilla_inexistente',
           error: `No existe la plantilla "${parsed.data.tipo}"`,
-          detalle: `Tipos disponibles: ${PLANTILLAS.map((p) => p.tipo).join(', ')}. Ver GET /api/plantillas.`,
+          detalle: `Tipos disponibles: ${tipos}. Ver GET /api/plantillas.`,
+          log: `Rechazado: no existe la plantilla "${parsed.data.tipo}".`,
         },
         { status: 400 }
       );
     }
     const data = parsePlantillaData(plantilla, parsed.data.data);
     if (!data.ok) {
-      return reply({ error: 'Datos de la plantilla inválidos', detalle: data.detalle }, { status: 400 });
+      return reply(
+        {
+          ok: false,
+          codigo: 'plantilla_invalida',
+          error: 'Datos de la plantilla inválidos',
+          detalle: data.detalle,
+          log: `Rechazado: los datos de la plantilla "${parsed.data.tipo}" no son válidos.`,
+        },
+        { status: 400 }
+      );
     }
     const clasificacion = sistema?.clasificacion ?? (await clasificacionDe(origen, null));
     const check = checkPlantillaParaSistema(
@@ -121,7 +159,17 @@ export async function POST(req: NextRequest) {
       { origen, clasificacion },
       { esAdmin: caller.kind === 'admin' }
     );
-    if (!check.ok) return reply({ error: check.error }, { status: check.status });
+    if (!check.ok) {
+      return reply(
+        {
+          ok: false,
+          codigo: 'plantilla_no_permitida',
+          error: check.error,
+          log: `Rechazado: ${check.error}`,
+        },
+        { status: check.status }
+      );
+    }
 
     const rendered = renderPlantilla(plantilla, data.data, nombre);
     asunto = rendered.asunto;
@@ -136,8 +184,11 @@ export async function POST(req: NextRequest) {
     if (sistema && !sistema.permiteRawHtml) {
       return reply(
         {
+          ok: false,
+          codigo: 'html_libre_no_permitido',
           error: 'Este sistema no tiene permitido enviar HTML libre',
           detalle: 'Usá una plantilla: tipo + data (ver GET /api/plantillas).',
+          log: 'Rechazado: este sistema no puede enviar HTML libre. Usá una plantilla (tipo + data).',
         },
         { status: 403 }
       );
@@ -184,8 +235,9 @@ export async function POST(req: NextRequest) {
   const suppressed = await findActiveSuppression(email, origen);
   if (suppressed) {
     const detalle = suppressionErrorDetail(suppressed);
+    let suppressedId: number | undefined;
     try {
-      await prisma.mailLog.create({
+      const created = await prisma.mailLog.create({
         data: {
           ...baseData,
           messageId: `suppressed-${randomUUID()}`,
@@ -202,7 +254,9 @@ export async function POST(req: NextRequest) {
             ],
           },
         },
+        select: { id: true },
       });
+      suppressedId = created.id;
     } catch (err) {
       if (isUniqueViolation(err)) {
         const raced = await replyExisting();
@@ -211,10 +265,19 @@ export async function POST(req: NextRequest) {
     }
     return reply(
       {
+        ok: false,
+        codigo: 'destinatario_suprimido',
         error: 'Destinatario en lista de supresión',
         motivo: suppressed.motivo,
         origen: suppressed.origen,
         detalle,
+        ...(suppressedId != null ? { id: suppressedId } : {}),
+        log: logSuprimido({
+          email,
+          id: suppressedId,
+          motivo: suppressed.motivo,
+          detalle,
+        }),
       },
       { status: 422 }
     );
@@ -257,8 +320,15 @@ export async function POST(req: NextRequest) {
       if (raced) return raced;
     }
     console.error('[api/mail] no se pudo registrar el envío', err);
+    const detalle = mailErrorMessage(err);
     return reply(
-      { error: 'No se pudo registrar el envío', detalle: mailErrorMessage(err) },
+      {
+        ok: false,
+        codigo: 'registro_fallido',
+        error: 'No se pudo registrar el envío',
+        detalle,
+        log: `No se pudo registrar el envío a ${email}: ${detalle}`,
+      },
       { status: 500 }
     );
   }
@@ -272,7 +342,14 @@ export async function POST(req: NextRequest) {
       console.error('[api/mail] no se pudo encolar', logId, err);
     }
     return reply(
-      { ok: true, id: logId, estado: 'en_cola', adjuntos: filenames },
+      {
+        ok: true,
+        codigo: 'encolado',
+        id: logId,
+        estado: 'en_cola',
+        adjuntos: filenames,
+        log: logEncolado({ id: logId, email, adjuntos: filenames }),
+      },
       { status: 202 }
     );
   }
@@ -294,20 +371,47 @@ export async function POST(req: NextRequest) {
     case 'sent':
       return reply({
         ok: true,
+        codigo: 'enviado',
         id: logId,
+        estado: 'enviado',
         messageId: result.messageId,
         adjuntos: filenames,
+        log: logEnviado({ id: logId, email, messageId: result.messageId, adjuntos: filenames }),
       });
     case 'suppressed':
       return reply(
-        { error: 'Destinatario en lista de supresión', detalle: result.detalle, id: logId },
+        {
+          ok: false,
+          codigo: 'destinatario_suprimido',
+          error: 'Destinatario en lista de supresión',
+          detalle: result.detalle,
+          id: logId,
+          log: logSuprimido({ email, id: logId, detalle: result.detalle }),
+        },
         { status: 422 }
       );
     case 'skipped':
-      return reply({ ok: true, id: logId, estado: 'en_cola', adjuntos: filenames }, { status: 202 });
+      return reply(
+        {
+          ok: true,
+          codigo: 'encolado',
+          id: logId,
+          estado: 'en_cola',
+          adjuntos: filenames,
+          log: logEncolado({ id: logId, email, adjuntos: filenames }),
+        },
+        { status: 202 }
+      );
     case 'failed':
       return reply(
-        { error: 'No se pudo enviar el mail', detalle: result.detalle, id: logId },
+        {
+          ok: false,
+          codigo: 'envio_fallido',
+          error: 'No se pudo enviar el mail',
+          detalle: result.detalle,
+          id: logId,
+          log: `No se pudo enviar el mail (id ${logId}) a ${email}: ${result.detalle}`,
+        },
         { status: 502 }
       );
   }

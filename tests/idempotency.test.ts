@@ -52,11 +52,25 @@ describe('replyForExisting', () => {
   it('devuelve el original marcado como duplicado', () => {
     const r = replyForExisting(record, hash);
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ id: 7, duplicado: true, messageId: record.messageId });
+    expect(r.body).toMatchObject({
+      ok: true,
+      codigo: 'duplicado',
+      id: 7,
+      duplicado: true,
+      estado: 'entregado',
+      messageId: record.messageId,
+    });
+    expect(r.body.log).toBe(
+      'No se reenvió: la clave ya corresponde al envío 7 (estado entregado).'
+    );
   });
 
   it('responde 409 si el contenido es otro', () => {
-    expect(replyForExisting(record, 'f'.repeat(64)).status).toBe(409);
+    const r = replyForExisting(record, 'f'.repeat(64));
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ ok: false, codigo: 'idempotencia_conflicto', id: 7 });
+    expect(r.body.log).toContain('envío 7');
+    expect(r.body.log).toContain('otro contenido');
   });
 
   it('repite el 422 si el original fue suprimido', () => {

@@ -5,6 +5,7 @@ import { getMailProvider } from '@/lib/mail';
 import { decryptSecret } from './crypto';
 import { GoogleOAuthError, refreshAccessToken } from './oauth';
 import { fechaDeStat, listDomains, listTrafficStats, type TrafficStat } from './postmaster-api';
+import { mensajeErrorPostmaster } from './scopes';
 
 const SPAM_ALERT = 0.003;
 const AUTH_ALERT = 0.95;
@@ -22,6 +23,8 @@ export type SyncResult = {
   dias: number;
   dominio?: string;
   alertas: string[];
+  /** true cuando el ciclo automático no llamó a Google (sin cuenta, vencida o todavía fresca). */
+  omitido?: boolean;
 };
 
 function ymd(d: Date): string {
@@ -189,7 +192,7 @@ async function alertSyncDown(): Promise<void> {
   if (claimed.count > 0) {
     await sendAlerta(
       'Mail Service: Postmaster sin sincronizar hace más de 24 h',
-      'El worker o /sistemas → Sincronizar ahora no pudieron actualizar las métricas de Gmail.'
+      'La sincronización automática no pudo actualizar las métricas de Gmail. También se puede forzar desde /sistemas → Sincronizar ahora.'
     ).catch((err) => console.error('[postmaster] alerta de sync caída', err));
   }
 }
@@ -209,7 +212,7 @@ export async function syncPostmaster(): Promise<SyncResult> {
       await markExpired(err.message);
       return { ok: false, motivo: 'Token de Google vencido o revocado', dias: 0, alertas: ['token_vencido'] };
     }
-    const detalle = err instanceof Error ? err.message : String(err);
+    const detalle = mensajeErrorPostmaster(err instanceof Error ? err.message : String(err));
     await prisma.mail_google_conexion.update({
       where: { id: row.id },
       data: { ultimoError: detalle.slice(0, 1000) },
@@ -255,7 +258,7 @@ export async function syncPostmaster(): Promise<SyncResult> {
       await markExpired(err.message);
       return { ok: false, motivo: 'Token de Google vencido o revocado', dias: 0, alertas: ['token_vencido'] };
     }
-    const detalle = err instanceof Error ? err.message : String(err);
+    const detalle = mensajeErrorPostmaster(err instanceof Error ? err.message : String(err));
     await prisma.mail_google_conexion.update({
       where: { id: row.id },
       data: { ultimoError: detalle.slice(0, 1000) },

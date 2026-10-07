@@ -1,11 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { config } from '@/lib/config';
+import { GOOGLE_SCOPES, MENSAJE_SCOPE_POSTMASTER, tieneScopePostmaster } from './scopes';
 
-export const GOOGLE_SCOPES = [
-  'https://www.googleapis.com/auth/postmaster.readonly',
-  'openid',
-  'email',
-].join(' ');
+export { GOOGLE_SCOPES };
 
 export const STATE_COOKIE = 'mlc_google_oauth';
 const STATE_TTL_MS = 10 * 60 * 1000;
@@ -113,6 +110,7 @@ type TokenResponse = {
   refresh_token?: string;
   expires_in?: number;
   id_token?: string;
+  scope?: string;
   error?: string;
   error_description?: string;
 };
@@ -136,6 +134,7 @@ export async function exchangeCode(code: string): Promise<{
   refreshToken: string;
   expiresIn: number;
   email: string;
+  scopes: string;
 }> {
   const c = config();
   if (!c.googleClientId || !c.googleClientSecret) {
@@ -154,12 +153,27 @@ export async function exchangeCode(code: string): Promise<{
       'http'
     );
   }
+  const scopes = await scopesOtorgados(json.access_token, json.scope);
   return {
     accessToken: json.access_token,
     refreshToken: json.refresh_token,
     expiresIn: json.expires_in ?? 3600,
     email: emailFromIdToken(json.id_token) ?? '',
+    scopes,
   };
+}
+
+async function scopesOtorgados(accessToken: string, declared: string | undefined): Promise<string> {
+  if (declared && tieneScopePostmaster(declared)) return declared;
+  const res = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`
+  );
+  const json = (await res.json().catch(() => ({}))) as { scope?: string };
+  const scope = typeof json.scope === 'string' ? json.scope : '';
+  if (!tieneScopePostmaster(scope)) {
+    throw new GoogleOAuthError(MENSAJE_SCOPE_POSTMASTER, 'http');
+  }
+  return scope;
 }
 
 export async function refreshAccessToken(refreshToken: string): Promise<{
