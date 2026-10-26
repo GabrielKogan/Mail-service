@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import NewSystemModal from '@/components/NewSystemModal';
+import { copyText } from '@/lib/client/clipboard';
 
 export default function HomePage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newKey, setNewKey] = useState<{ sistema: string; key: string } | null>(null);
+  const [copyMsg, setCopyMsg] = useState('');
   return (
     <main className="page">
       <header className="page-header">
@@ -27,11 +29,29 @@ export default function HomePage() {
           <p style={{ margin: 0 }}>
             Clave nueva para <strong>{newKey.sistema}</strong>. Copiala ahora: no se vuelve a mostrar.
           </p>
-          <pre className="code" style={{ userSelect: 'all', whiteSpace: 'pre-wrap' }}>{newKey.key}</pre>
-          <div className="actions" style={{ marginTop: 0 }}>
-            <button className="btn secondary" type="button" onClick={() => void navigator.clipboard?.writeText(newKey.key)}>Copiar</button>
-            <button className="btn secondary" type="button" onClick={() => setNewKey(null)}>Ya la guardé</button>
+          <input
+            readOnly
+            className="code"
+            value={newKey.key}
+            aria-label="Clave de API"
+            onFocus={(e) => e.currentTarget.select()}
+            style={{ display: 'block', width: '100%', marginTop: 8, userSelect: 'all' }}
+          />
+          <div className="actions" style={{ marginTop: 8 }}>
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={() => {
+                void copyText(newKey.key).then((ok) => {
+                  setCopyMsg(ok ? 'Copiada al portapapeles.' : 'No se pudo copiar. Seleccioná la clave y usá Ctrl+C.');
+                });
+              }}
+            >
+              Copiar
+            </button>
+            <button className="btn secondary" type="button" onClick={() => { setNewKey(null); setCopyMsg(''); }}>Ya la guardé</button>
           </div>
+          {copyMsg ? <p className="muted" style={{ margin: '8px 0 0' }}>{copyMsg}</p> : null}
         </div>
       ) : null}
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { copyText } from '@/lib/client/clipboard';
 import { apiFetch } from '@/lib/client/token';
 import NewSystemModal from '@/components/NewSystemModal';
 import { esErrorScopePostmaster, mensajeErrorPostmaster } from '@/lib/google/scopes';
@@ -412,6 +413,7 @@ export default function SistemasPage() {
   const [newKey, setNewKey] = useState<{ sistema: string; key: string } | null>(null);
   const [generatedKeys, setGeneratedKeys] = useState<Record<number, string>>({});
   const [showNewModal, setShowNewModal] = useState(false);
+  const [copyMsg, setCopyMsg] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -500,6 +502,7 @@ export default function SistemasPage() {
   async function generateKey(s: Sistema): Promise<string | null> {
     setBusy(`key-${s.id}`);
     setError('');
+    setCopyMsg('');
     setNewKey(null);
     try {
       const res = await apiFetch(`/api/admin/sistemas/${s.id}/keys`, { method: 'POST' });
@@ -568,24 +571,34 @@ export default function SistemasPage() {
       </header>
 
       {error ? <div className="alert error">{error}</div> : null}
+      {copyMsg ? <p className="muted">{copyMsg}</p> : null}
       {newKey ? (
         <div className="alert ok">
           <p style={{ margin: 0 }}>
             Clave nueva para <strong>{newKey.sistema}</strong>. Copiala ahora: no
             se vuelve a mostrar.
           </p>
-          <pre className="code" style={{ userSelect: 'all', whiteSpace: 'pre-wrap' }}>
-            {newKey.key}
-          </pre>
-          <div className="actions" style={{ marginTop: 0 }}>
+          <input
+            readOnly
+            className="code"
+            value={newKey.key}
+            aria-label="Clave de API"
+            onFocus={(e) => e.currentTarget.select()}
+            style={{ display: 'block', width: '100%', marginTop: 8, userSelect: 'all' }}
+          />
+          <div className="actions" style={{ marginTop: 8 }}>
             <button
               className="btn secondary"
               type="button"
-              onClick={() => void navigator.clipboard?.writeText(newKey.key)}
+              onClick={() => {
+                void copyText(newKey.key).then((ok) => {
+                  setCopyMsg(ok ? 'Copiada al portapapeles.' : 'No se pudo copiar. Seleccioná la clave y usá Ctrl+C.');
+                });
+              }}
             >
               Copiar
             </button>
-            <button className="btn secondary" type="button" onClick={() => setNewKey(null)}>
+            <button className="btn secondary" type="button" onClick={() => { setNewKey(null); setCopyMsg(''); }}>
               Ya la guardé
             </button>
           </div>
@@ -636,24 +649,25 @@ export default function SistemasPage() {
                               type="button"
                               title="Copiar clave"
                               aria-label={`Copiar clave ${k.prefijo}`}
-                              onClick={async () => {
-                                try {
-                                  // if we have the full key for this key id in memory, copy it
-                                  if (generatedKeys[k.id]) {
-                                    await navigator.clipboard?.writeText(generatedKeys[k.id]);
-                                    window.alert('Clave copiada al portapapeles.');
-                                    return;
-                                  }
-                                  // else ask user to confirm generating a new key to copy
-                                  if (!window.confirm('No es posible recuperar la clave completa. ¿Generar una nueva clave y copiarla ahora?')) return;
-                                  const full = await generateKey(s);
-                                  if (full) {
-                                    await navigator.clipboard?.writeText(full);
-                                    window.alert('Nueva clave generada y copiada al portapapeles.');
-                                  }
-                                } catch (e) {
-                                  // ignore clipboard errors
+                              onClick={() => {
+                                const full =
+                                  generatedKeys[k.id] ??
+                                  (newKey?.key.startsWith(`mls_${k.prefijo}_`) ? newKey.key : null);
+                                if (!full) {
+                                  setCopyMsg('');
+                                  setError(
+                                    'La clave completa solo se muestra una vez, al generarla. Este ícono no la recupera ni crea otra. Si la perdiste, usá «Generar clave».'
+                                  );
+                                  return;
                                 }
+                                void copyText(full).then((ok) => {
+                                  setError('');
+                                  setCopyMsg(
+                                    ok
+                                      ? 'Copiada al portapapeles.'
+                                      : 'No se pudo copiar. Seleccioná la clave del recuadro y usá Ctrl+C.'
+                                  );
+                                });
                               }}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
