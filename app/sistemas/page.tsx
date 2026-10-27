@@ -532,23 +532,45 @@ export default function SistemasPage() {
     void load();
   }
 
-  async function copyStoredKey(k: ApiKey) {
-    const full =
+  async function copyStoredKey(s: Sistema, k: ApiKey) {
+    let full =
       generatedKeys[k.id] ??
       (newKey?.key.startsWith(`mls_${k.prefijo}_`) ? newKey.key : null);
+    if (!full) {
+      try {
+        const res = await apiFetch(`/api/admin/sistemas/${s.id}/keys?keyId=${k.id}`);
+        if (!res.ok) {
+          setKeyNote({
+            id: k.id,
+            ok: false,
+            text: await readError(res, 'Esta clave no quedó guardada. Generá una nueva: esa se puede copiar.'),
+          });
+          return;
+        }
+        const json = (await res.json()) as { key?: string };
+        full = json.key ?? null;
+      } catch {
+        setKeyNote({ id: k.id, ok: false, text: 'Error de red al copiar la clave.' });
+        return;
+      }
+    }
     if (!full) {
       setKeyNote({
         id: k.id,
         ok: false,
-        text: 'Esta clave ya no se puede copiar. La completa solo aparece una vez, al generarla.',
+        text: 'Esta clave no quedó guardada. Generá una nueva: esa se puede copiar.',
       });
       return;
     }
+    setGeneratedKeys((p) => ({ ...p, [k.id]: full as string }));
+    setNewKey({ sistema: s.nombre, key: full });
     const ok = await copyText(full);
     setKeyNote({
       id: k.id,
       ok,
-      text: ok ? 'Copiada al portapapeles.' : 'No se pudo copiar. Seleccioná la clave del recuadro verde y usá Ctrl+C.',
+      text: ok
+        ? 'Copiada al portapapeles.'
+        : 'La clave está en el recuadro de arriba. Seleccionala y usá Ctrl+C.',
     });
   }
 
@@ -621,8 +643,8 @@ export default function SistemasPage() {
       {newKey ? (
         <div className="alert ok">
           <p style={{ margin: 0 }}>
-            Clave nueva para <strong>{newKey.sistema}</strong>. Copiala ahora: no
-            se vuelve a mostrar.
+            Clave de <strong>{newKey.sistema}</strong>. También podés copiarla
+            después desde el listado.
           </p>
           <input
             readOnly
@@ -701,7 +723,7 @@ export default function SistemasPage() {
                               type="button"
                               title="Copiar clave"
                               aria-label={`Copiar clave ${k.prefijo}`}
-                              onClick={() => void copyStoredKey(k)}
+                              onClick={() => void copyStoredKey(s, k)}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                                 <path d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1z" fill="currentColor"/>

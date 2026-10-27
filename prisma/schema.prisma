@@ -105,6 +105,8 @@ model mail_api_key {
   prefijo    String       @unique(map: "UQ_mail_api_key_prefijo") @db.VarChar(16)
   /// SHA-256 (hex) de la clave completa.
   hash       String       @db.Char(64)
+  /// Clave completa cifrada, para que el administrador pueda copiarla después.
+  clave      String?      @db.NVarChar(500)
   activo     Boolean      @default(true)
   fechaAlta  DateTime     @default(now()) @map("fecha_alta")
   ultimoUso  DateTime?    @map("ultimo_uso")

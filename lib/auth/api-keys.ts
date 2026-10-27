@@ -1,6 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { requestToken } from '@/lib/auth';
+import { config } from '@/lib/config';
 import { toSistemaAuth, type SistemaAuth } from '@/lib/mail/sistemas';
 
 /** mls_<prefijo de 8 hex>_<32 bytes en base64url> */
@@ -10,6 +11,34 @@ const TOUCH_INTERVAL_MS = 60_000;
 
 export function hashApiKey(key: string): string {
   return createHash('sha256').update(key).digest('hex');
+}
+
+function sealKeyBytes(): Buffer {
+  return createHash('sha256').update(`mail-api-key:${config().unsubscribeSecret}`).digest();
+}
+
+/** Guarda la clave para que un administrador pueda copiarla después. */
+export function sealApiKey(plain: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', sealKeyBytes(), iv);
+  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return ['v1', iv.toString('hex'), tag.toString('hex'), enc.toString('hex')].join('.');
+}
+
+export function openApiKey(packed: string): string | null {
+  try {
+    const [version, ivHex, tagHex, dataHex] = packed.split('.');
+    if (version !== 'v1' || !ivHex || !tagHex || !dataHex) return null;
+    const decipher = createDecipheriv('aes-256-gcm', sealKeyBytes(), Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataHex, 'hex')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch {
+    return null;
+  }
 }
 
 export function generateApiKey(): { key: string; prefijo: string; hash: string } {
