@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { isAdmin } from '@/lib/auth';
 import { sistemaUpdateSchema } from '@/lib/validation';
-import { clearSistemaCache } from '@/lib/mail/sistemas';
+import { clearSistemaCache, PANEL_ORIGEN } from '@/lib/mail/sistemas';
 
 export const runtime = 'nodejs';
 
@@ -49,6 +49,46 @@ export async function PATCH(
         : {}),
     },
   });
+  clearSistemaCache();
+
+  return NextResponse.json({ ok: true });
+}
+
+/** Borra el sistema y sus claves. Si ya tiene envíos, se rechaza para no perder el historial. */
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  if (!isAdmin(req)) {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+  }
+
+  const id = Number((await params).id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: 'Id inválido' }, { status: 400 });
+  }
+
+  const existing = await prisma.mail_sistema.findUnique({
+    where: { id },
+    include: { _count: { select: { mail_logs: true } } },
+  });
+  if (!existing) {
+    return NextResponse.json({ error: 'No encontrado' }, { status: 404 });
+  }
+  if (existing.origen === PANEL_ORIGEN) {
+    return NextResponse.json({ error: 'El sistema panel no se puede eliminar' }, { status: 400 });
+  }
+  if (existing._count.mail_logs > 0) {
+    return NextResponse.json(
+      { error: 'No se puede eliminar: tiene envíos registrados.' },
+      { status: 409 }
+    );
+  }
+
+  await prisma.$transaction([
+    prisma.mail_api_key.deleteMany({ where: { sistemaId: id } }),
+    prisma.mail_sistema.delete({ where: { id } }),
+  ]);
   clearSistemaCache();
 
   return NextResponse.json({ ok: true });

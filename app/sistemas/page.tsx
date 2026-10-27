@@ -414,6 +414,7 @@ export default function SistemasPage() {
   const [generatedKeys, setGeneratedKeys] = useState<Record<number, string>>({});
   const [showNewModal, setShowNewModal] = useState(false);
   const [copyMsg, setCopyMsg] = useState('');
+  const [keyNote, setKeyNote] = useState<{ id: number; text: string; ok: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -531,6 +532,52 @@ export default function SistemasPage() {
     void load();
   }
 
+  async function copyStoredKey(k: ApiKey) {
+    const full =
+      generatedKeys[k.id] ??
+      (newKey?.key.startsWith(`mls_${k.prefijo}_`) ? newKey.key : null);
+    if (!full) {
+      setKeyNote({
+        id: k.id,
+        ok: false,
+        text: 'Esta clave ya no se puede copiar. La completa solo aparece una vez, al generarla.',
+      });
+      return;
+    }
+    const ok = await copyText(full);
+    setKeyNote({
+      id: k.id,
+      ok,
+      text: ok ? 'Copiada al portapapeles.' : 'No se pudo copiar. Seleccioná la clave del recuadro verde y usá Ctrl+C.',
+    });
+  }
+
+  async function deleteSistema(s: Sistema) {
+    if (s.origen === 'panel') return;
+    const ok = window.confirm(
+      `¿Eliminar el sistema ${s.nombre} (${s.origen}) y sus claves? No se puede deshacer.`
+    );
+    if (!ok) return;
+    setBusy(`del-${s.id}`);
+    setError('');
+    try {
+      const res = await apiFetch(`/api/admin/sistemas/${s.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        setError(await readError(res, 'No se pudo eliminar el sistema'));
+        return;
+      }
+      if (editId === s.id) {
+        setEditId(null);
+        setEdit(null);
+      }
+      await load();
+    } catch {
+      setError('Error de red al eliminar el sistema.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function revokeKey(s: Sistema, k: ApiKey) {
     if (!window.confirm(`¿Revocar la clave ${k.prefijo} de ${s.nombre}? El sistema deja de poder enviar con ella.`)) {
       return;
@@ -571,7 +618,6 @@ export default function SistemasPage() {
       </header>
 
       {error ? <div className="alert error">{error}</div> : null}
-      {copyMsg ? <p className="muted">{copyMsg}</p> : null}
       {newKey ? (
         <div className="alert ok">
           <p style={{ margin: 0 }}>
@@ -590,9 +636,14 @@ export default function SistemasPage() {
             <button
               className="btn secondary"
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                const box = e.currentTarget.closest('.alert')?.querySelector('input');
+                if (box instanceof HTMLInputElement) {
+                  box.focus();
+                  box.select();
+                }
                 void copyText(newKey.key).then((ok) => {
-                  setCopyMsg(ok ? 'Copiada al portapapeles.' : 'No se pudo copiar. Seleccioná la clave y usá Ctrl+C.');
+                  setCopyMsg(ok ? 'Copiada al portapapeles.' : 'No se pudo copiar. El texto quedó seleccionado: usá Ctrl+C.');
                 });
               }}
             >
@@ -602,6 +653,7 @@ export default function SistemasPage() {
               Ya la guardé
             </button>
           </div>
+          {copyMsg ? <p style={{ margin: '8px 0 0', fontWeight: 700 }}>{copyMsg}</p> : null}
         </div>
       ) : null}
 
@@ -649,26 +701,7 @@ export default function SistemasPage() {
                               type="button"
                               title="Copiar clave"
                               aria-label={`Copiar clave ${k.prefijo}`}
-                              onClick={() => {
-                                const full =
-                                  generatedKeys[k.id] ??
-                                  (newKey?.key.startsWith(`mls_${k.prefijo}_`) ? newKey.key : null);
-                                if (!full) {
-                                  setCopyMsg('');
-                                  setError(
-                                    'La clave completa solo se muestra una vez, al generarla. Este ícono no la recupera ni crea otra. Si la perdiste, usá «Generar clave».'
-                                  );
-                                  return;
-                                }
-                                void copyText(full).then((ok) => {
-                                  setError('');
-                                  setCopyMsg(
-                                    ok
-                                      ? 'Copiada al portapapeles.'
-                                      : 'No se pudo copiar. Seleccioná la clave del recuadro y usá Ctrl+C.'
-                                  );
-                                });
-                              }}
+                              onClick={() => void copyStoredKey(k)}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                                 <path d="M16 1H4c-1.1 0-2 .9-2 2v12h2V3h12V1z" fill="currentColor"/>
@@ -678,6 +711,9 @@ export default function SistemasPage() {
                             <span className={`badge ${k.activo && !k.revocadaEn ? 'enviado' : 'error'}`} style={{ marginLeft: 8 }}>
                               {k.activo && !k.revocadaEn ? 'Vigente' : `Revocada ${k.revocadaEn ? formatFecha(k.revocadaEn) : ''}`}
                             </span>
+                            {keyNote?.id === k.id ? (
+                              <span style={{ color: keyNote.ok ? 'var(--ok)' : 'var(--danger)', fontSize: '0.82rem' }}>{keyNote.text}</span>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -693,6 +729,16 @@ export default function SistemasPage() {
                       <button className="btn" type="button" disabled={busy === `key-${s.id}`} onClick={() => void generateKey(s)}>
                         {busy === `key-${s.id}` ? 'Generando…' : 'Generar clave'}
                       </button>
+                      {s.origen !== 'panel' ? (
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          disabled={busy === `del-${s.id}`}
+                          onClick={() => void deleteSistema(s)}
+                        >
+                          {busy === `del-${s.id}` ? 'Eliminando…' : 'Eliminar'}
+                        </button>
+                      ) : null}
                       <button className="btn secondary" type="button" onClick={() => startEdit(s)} aria-label={`Editar ${s.nombre}`}>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ verticalAlign: 'middle', display: 'inline-block' }} aria-hidden>
                           <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="currentColor" />

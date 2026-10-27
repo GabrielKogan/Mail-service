@@ -16,7 +16,6 @@
     "build:worker": "tsup",
     "worker": "node dist/worker.js",
     "worker:dev": "tsup && node --env-file=.env dist/worker.js",
-    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
