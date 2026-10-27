@@ -533,7 +533,7 @@ export default function SistemasPage() {
   }
 
   async function copyStoredKey(s: Sistema, k: ApiKey) {
-    let full =
+    let full: string | null =
       generatedKeys[k.id] ??
       (newKey?.key.startsWith(`mls_${k.prefijo}_`) ? newKey.key : null);
     if (!full) {
@@ -622,6 +622,8 @@ export default function SistemasPage() {
     }
   }
 
+  const editing = editId != null ? sistemas?.find((s) => s.id === editId) ?? null : null;
+
   return (
     <main className="page">
       <header className="page-header">
@@ -681,6 +683,106 @@ export default function SistemasPage() {
 
       {showNewModal ? (
         <NewSystemModal onClose={() => setShowNewModal(false)} onCreated={(k) => handleModalCreated(k)} />
+      ) : null}
+
+      {edit && editing ? (
+        <div className="modal-overlay">
+          <div className="modal card" role="dialog" aria-modal="true" aria-labelledby="edit-sistema-title">
+            <div className="modal-header">
+              <h2 id="edit-sistema-title" style={{ margin: 0 }}>Editar {editing.nombre}</h2>
+              <button
+                className="modal-close"
+                type="button"
+                aria-label="Cerrar"
+                disabled={busy === `edit-${editing.id}`}
+                onClick={() => {
+                  setEditId(null);
+                  setEdit(null);
+                }}
+              >
+                x
+              </button>
+            </div>
+            {error ? <div className="alert error" style={{ marginTop: 8 }}>{error}</div> : null}
+            <form
+              className="form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveEdit(editing.id);
+              }}
+            >
+              <p className="muted" style={{ marginTop: 8 }}>
+                Origen <code>{editing.origen}</code>. No se puede cambiar: las claves y los envíos quedan atados a ese nombre.
+              </p>
+              <div className="grid-2">
+                <label>
+                  Nombre
+                  <input
+                    value={edit.nombre}
+                    onChange={(e) => setEdit({ ...edit, nombre: e.target.value })}
+                    required
+                    maxLength={120}
+                  />
+                </label>
+                <label>
+                  Clasificación
+                  <select
+                    value={edit.clasificacion}
+                    onChange={(e) =>
+                      setEdit({
+                        ...edit,
+                        clasificacion: e.target.value as Sistema['clasificacion'],
+                      })
+                    }
+                  >
+                    <option value="transactional">Transaccional</option>
+                    <option value="subscription">Suscripción</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Orígenes CORS (separados por coma)
+                <input
+                  value={edit.corsOrigins}
+                  onChange={(e) => setEdit({ ...edit, corsOrigins: e.target.value })}
+                  placeholder="https://turnos.lujandecuyo.gob.ar"
+                />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={edit.permiteRawHtml}
+                  onChange={(e) => setEdit({ ...edit, permiteRawHtml: e.target.checked })}
+                />
+                <span>Permite enviar HTML libre</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={edit.activo}
+                  onChange={(e) => setEdit({ ...edit, activo: e.target.checked })}
+                />
+                <span>Sistema activo</span>
+              </label>
+              <div className="actions">
+                <button className="btn" type="submit" disabled={busy === `edit-${editing.id}`}>
+                  {busy === `edit-${editing.id}` ? 'Guardando…' : 'Guardar'}
+                </button>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  disabled={busy === `edit-${editing.id}`}
+                  onClick={() => {
+                    setEditId(null);
+                    setEdit(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       ) : null}
 
       <SesEstadoCard />
