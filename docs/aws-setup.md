@@ -31,7 +31,7 @@ aws cloudformation deploy \
   --parameter-overrides \
       SesSnsTopicArn=arn:aws:sns:eu-central-1:<cuenta>:<topico-ses> \
       SesConfigurationSetName=<configuration-set> \
-      MailFromEmail=registro@lujandecuyo.gob.ar \
+      MailFromEmail=no-reply@lujandecuyo.gob.ar \
       AlarmEmail=sistemas@lujandecuyo.gob.ar
 
 aws cloudformation describe-stacks --region eu-central-1 \
@@ -114,8 +114,8 @@ Con el worker corriendo, el contador vuelve a 0 y el evento aparece en el detall
 ## 5. Autenticación del dominio (DKIM, SPF, DMARC y TLS)
 
 Gmail y Yahoo exigen a los remitentes masivos SPF, DKIM y DMARC alineados con el dominio del
-`From`. El `From` sigue siendo `registro@lujandecuyo.gob.ar`; lo que se agrega es la
-autenticación del dominio `lujandecuyo.gob.ar` en SES. El estado se ve en `/sistemas`
+`From`. El `From` es una dirección de `lujandecuyo.gob.ar` (`MAIL_FROM_EMAIL`, hoy
+`no-reply@lujandecuyo.gob.ar`); lo que se agrega es la autenticación del dominio en SES. El estado se ve en `/sistemas`
 (tarjeta "Estado de SES", en rojo lo que falta).
 
 ### DKIM (Easy DKIM, 2048 bits)

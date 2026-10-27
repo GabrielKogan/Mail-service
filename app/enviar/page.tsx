@@ -8,6 +8,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_TOTAL_BYTES,
 } from '@/lib/attachment-limits';
+import { sanitizeHtml } from '@/lib/sanitize-html';
 
 type SendOk = {
   ok: true;
@@ -167,7 +168,11 @@ export default function EnviarPage() {
         setError(('error' in json ? json.error : 'No se pudo previsualizar') + extra);
         return;
       }
-      setPreview(json as Preview);
+      const previewData = json as Preview;
+      setPreview({
+        ...previewData,
+        html: sanitizeHtml(previewData.html),
+      });
     } catch {
       setError('Error de red al previsualizar.');
     } finally {

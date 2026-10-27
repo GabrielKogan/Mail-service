@@ -4,19 +4,36 @@ import { allSistemaCorsOrigins } from '@/lib/mail/sistemas';
 
 const ALLOWED_HEADERS = 'Content-Type, Authorization, x-internal-token, x-api-key';
 const ALLOWED_METHODS = 'GET, POST, OPTIONS';
+const VALID_ORIGIN = /^https?:\/\/([a-z0-9.-]+)(?::\d+)?$/i;
 
 export type CorsAllowList = string[] | '*' | null;
+
+export function normalizeCorsOrigins(rawValue: string | null | undefined): string[] {
+  if (!rawValue) return [];
+  const list = rawValue
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => {
+      if (item === '*') return false;
+      try {
+        const url = new URL(item);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch {
+        return VALID_ORIGIN.test(item);
+      }
+    });
+
+  return Array.from(new Set(list));
+}
 
 /** Lista global `CORS_ORIGINS` (interfaz y credencial legacy). */
 export function globalCorsOrigins(): CorsAllowList {
   const raw = config().corsOrigins;
   if (!raw) return null;
-  if (raw === '*') return '*';
-  const list = raw
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return list.length ? list : null;
+  const list = normalizeCorsOrigins(raw);
+  if (!list.length) return null;
+  return list;
 }
 
 function allowOrigin(req: NextRequest, allowed: CorsAllowList): string | null {
@@ -61,7 +78,6 @@ export function corsPreflight(req: NextRequest): NextResponse {
  */
 export async function mailCorsPreflight(req: NextRequest): Promise<NextResponse> {
   const global = globalCorsOrigins();
-  if (global === '*') return corsPreflight(req);
   let sistemas = new Set<string>();
   try {
     sistemas = await allSistemaCorsOrigins();

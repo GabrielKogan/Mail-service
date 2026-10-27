@@ -25,8 +25,8 @@
     "@aws-sdk/client-sesv2": "^3.1139.0",
     "@aws-sdk/client-sqs": "^3.1139.0",
     "@prisma/client": "^5.22.0",
-    "next": "^16.3.8",
-    "nodemailer": "^10.0.10",
+    "next": "^16.4.3",
+    "nodemailer": "^10.2.1",
     "postcss": "8.5.28",
     "prisma": "^5.22.0",
     "react": "^18.3.0",
@@ -34,7 +34,7 @@
     "recharts": "^3.10.1",
     "sharp": "^0.35.5",
     "source-map-js": "^1.2.2",
-    "zod": "^3.23.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
@@ -44,11 +44,12 @@
     "esbuild": "^0.28.2",
     "tsup": "^8.5.1",
     "typescript": "^5.5.0",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.5"
   },
   "pnpm": {
     "overrides": {
       "esbuild": "0.28.2",
+      "vite": "8.3.5",
       "form-data": "2.5.6",
       "postcss": "8.5.28",
       "source-map-js": "1.2.2",

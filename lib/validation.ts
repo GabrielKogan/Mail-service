@@ -81,7 +81,7 @@ export const enviarMailSchema = z
     cuerpo: z.string().min(1).optional(),
     /** Plantilla: tipo + data (ver GET /api/plantillas). */
     tipo: z.string().min(1).max(60).optional(),
-    data: z.record(z.unknown()).optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
     /** Con clave de sistema es opcional: si se manda, tiene que coincidir con la credencial. */
     origen: z.string().max(120).optional(),
     /** Misma clave y mismo contenido devuelven el envío original sin reenviar. */

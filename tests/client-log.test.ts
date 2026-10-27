@@ -92,7 +92,7 @@ describe('límites de adjuntos', () => {
     expect(JSON.stringify(body)).not.toContain(mitad.slice(0, 40));
   });
 
-  it('prioriza el tipo y nombra los dos fallos', () => {
+  it('rechaza el exceso de archivos antes de revisar cada uno', () => {
     const adjuntos = [
       { filename: 'virus.exe', contentType: 'application/octet-stream', contentBase64: 'YQ==' },
       ...Array.from({ length: MAX_ATTACHMENTS }, () => pdf),
@@ -103,9 +103,9 @@ describe('límites de adjuntos', () => {
       cuerpo: '<p>x</p>',
       adjuntos,
     });
-    expect(body.codigo).toBe('tipo_adjunto_no_permitido');
-    expect(body.log).toContain('virus.exe');
+    expect(body.codigo).toBe('demasiados_adjuntos');
     expect(body.log).toContain('más de 15 archivos');
+    expect(JSON.stringify(body)).not.toContain('YQ==');
   });
 
   it('deja datos_invalidos cuando el fallo no es un adjunto', () => {

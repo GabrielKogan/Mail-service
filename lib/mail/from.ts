@@ -1,6 +1,6 @@
 import { config } from '@/lib/config';
 
-const DEFAULT_FROM_EMAIL = 'registro@lujandecuyo.gob.ar';
+const DEFAULT_FROM_EMAIL = 'no-reply@lujandecuyo.gob.ar';
 const DEFAULT_FROM_NAME = 'Municipalidad de Lujan de Cuyo';
 
 export function getMailFrom(): { email: string; name: string } {
