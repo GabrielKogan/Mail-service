@@ -87,6 +87,28 @@ function emptyData(campos: Campo[]): Record<string, string | string[]> {
   );
 }
 
+const MAILS_DE_ENVIO = [
+  { value: 'turnos', label: 'turnos@lujandecuyo.gob.ar' },
+  { value: 'rentas', label: 'rentas@lujandecuyo.gob.ar' },
+] as const;
+
+/** Nombre visible a partir del buzón: `turnos` o `turnos@dominio` → `Turnos`. */
+function nombreDeBuzon(buzon: string): string {
+  const local = buzon.split('@')[0]?.trim() ?? '';
+  if (!local) return '';
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+function remitenteElegido(
+  opcion: string,
+  otro: string
+): { desde?: string; nombre_remitente?: string } {
+  const buzon = (opcion === 'otro' ? otro : opcion).trim();
+  if (!buzon) return {};
+  const nombre = nombreDeBuzon(buzon);
+  return nombre ? { desde: buzon, nombre_remitente: nombre } : { desde: buzon };
+}
+
 export default function EnviarPage() {
   const [plantillas, setPlantillas] = useState<PlantillaInfo[]>([]);
   const [sistemas, setSistemas] = useState<Sistema[]>([]);
@@ -96,8 +118,8 @@ export default function EnviarPage() {
   const [origen, setOrigen] = useState('');
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
-  const [desde, setDesde] = useState('');
-  const [nombreRemitente, setNombreRemitente] = useState('');
+  const [mailEnvio, setMailEnvio] = useState('');
+  const [otroMail, setOtroMail] = useState('');
   const [asunto, setAsunto] = useState('');
   const [cuerpo, setCuerpo] = useState('<p></p>');
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -165,8 +187,7 @@ export default function EnviarPage() {
           tipo,
           data,
           nombre,
-          desde: desde.trim() || undefined,
-          nombre_remitente: nombreRemitente.trim() || undefined,
+          ...remitenteElegido(mailEnvio, otroMail),
         }),
       });
       const json = (await res.json()) as Preview | SendErr;
@@ -209,10 +230,7 @@ export default function EnviarPage() {
         return;
       }
       const adjuntos = await Promise.all(files.map(fileToAdjunto));
-      const remitente = {
-        ...(desde.trim() ? { desde: desde.trim() } : {}),
-        ...(nombreRemitente.trim() ? { nombre_remitente: nombreRemitente.trim() } : {}),
-      };
+      const remitente = remitenteElegido(mailEnvio, otroMail);
       const payload =
         modo === 'plantilla'
           ? { email, nombre, tipo, data, origen: origen || undefined, ...remitente, adjuntos }
@@ -261,8 +279,8 @@ export default function EnviarPage() {
           DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos,{' '}
           {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB cada uno y{' '}
           {MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB en total. Si no elegís sistema,
-          el origen queda como <code>panel</code>. El buzón (<code>desde</code>) cambia la
-          dirección de salida, por ejemplo <code>turnos</code> o <code>rentas@lujandecuyo.gob.ar</code>.
+          el origen queda como <code>panel</code>. El nombre del mail de envío elige la
+          dirección que ve el destinatario, por ejemplo <code>turnos@</code> o <code>rentas@</code>.
         </p>
       </header>
 
@@ -281,31 +299,41 @@ export default function EnviarPage() {
         </label>
 
         <label>
-          Buzón del remitente
-          <input
-            value={desde}
+          Nombre del mail de envío
+          <select
+            value={mailEnvio}
             onChange={(e) => {
-              setDesde(e.target.value);
+              setMailEnvio(e.target.value);
               setPreview(null);
             }}
-            placeholder="turnos o turnos@lujandecuyo.gob.ar"
-          />
+          >
+            <option value="">El configurado en el servicio</option>
+            {MAILS_DE_ENVIO.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+            <option value="otro">Otro buzón del municipio</option>
+          </select>
           <span className="muted">
-            Vacío usa el remitente del servicio. El dominio tiene que ser el configurado.
+            Cambia la dirección de salida. Vacío usa el remitente configurado.
           </span>
         </label>
-        <label>
-          Nombre visible del remitente
-          <input
-            value={nombreRemitente}
-            onChange={(e) => {
-              setNombreRemitente(e.target.value);
-              setPreview(null);
-            }}
-            placeholder="Turnos"
-          />
-          <span className="muted">Lo que ve el destinatario junto a la dirección.</span>
-        </label>
+        {mailEnvio === 'otro' ? (
+          <label>
+            Otro mail
+            <input
+              value={otroMail}
+              onChange={(e) => {
+                setOtroMail(e.target.value);
+                setPreview(null);
+              }}
+              placeholder="registro o registro@lujandecuyo.gob.ar"
+              required
+            />
+            <span className="muted">Tiene que ser un buzón de lujandecuyo.gob.ar.</span>
+          </label>
+        ) : null}
 
         <div className="actions" style={{ marginTop: 0 }}>
           <button
