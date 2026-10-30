@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   Mail Service - colas SQS (envios y eventos de SES) con sus colas de fallidos,
   suscripcion del topico SNS de SES, usuarios IAM mail-api y mail-worker y alarmas.
-  Desplegar en la misma region que SES y el topico SNS (eu-central-1).
+  La region principal es eu-central-1. En la de respaldo usar CreateIamUsers=false
+  para no recrear los usuarios y solo sumarles permisos de esa region.
 
 Parameters:
   SesSnsTopicArn:
@@ -18,6 +19,13 @@ Parameters:
     Type: String
     Default: ''
     Description: Email que recibe las alarmas (opcional; hay que confirmar la suscripcion).
+  CreateIamUsers:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >
+      true crea mail-api y mail-worker (region principal). false solo agrega
+      politicas de esta region a esos usuarios, que ya existen (region de respaldo).
   QueuePrefix:
     Type: String
     Default: mail
@@ -25,6 +33,8 @@ Parameters:
 
 Conditions:
   HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  CreateUsers: !Equals [!Ref CreateIamUsers, 'true']
+  GrantExistingUsers: !Equals [!Ref CreateIamUsers, 'false']
 
 Resources:
   # ---------- Colas ----------
@@ -98,6 +108,7 @@ Resources:
   # ---------- IAM ----------
   MailApiUser:
     Type: AWS::IAM::User
+    Condition: CreateUsers
     Properties:
       UserName: mail-api
       Policies:
@@ -129,6 +140,7 @@ Resources:
 
   MailWorkerUser:
     Type: AWS::IAM::User
+    Condition: CreateUsers
     Properties:
       UserName: mail-worker
       Policies:
@@ -232,6 +244,62 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlarmTopic]
+
+  # En la region de respaldo los usuarios ya existen: se les suma una politica por region.
+  MailApiRegionPolicy:
+    Type: AWS::IAM::Policy
+    Condition: GrantExistingUsers
+    Properties:
+      PolicyName: !Sub 'mail-api-${AWS::Region}'
+      Users:
+        - mail-api
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sqs:SendMessage
+            Resource: !GetAtt MailSendQueue.Arn
+          - Effect: Allow
+            Action: ses:GetEmailIdentity
+            Resource: !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+          - Effect: Allow
+            Action: ses:GetConfigurationSet
+            Resource: !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SesConfigurationSetName}'
+
+  MailWorkerRegionPolicy:
+    Type: AWS::IAM::Policy
+    Condition: GrantExistingUsers
+    Properties:
+      PolicyName: !Sub 'mail-worker-${AWS::Region}'
+      Users:
+        - mail-worker
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:ChangeMessageVisibility
+              - sqs:GetQueueAttributes
+            Resource:
+              - !GetAtt MailSendQueue.Arn
+              - !GetAtt MailSendDlq.Arn
+              - !GetAtt MailEventsQueue.Arn
+              - !GetAtt MailEventsDlq.Arn
+          - Effect: Allow
+            Action: sqs:SendMessage
+            Resource: !GetAtt MailSendQueue.Arn
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendRawEmail
+            Resource:
+              - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+              - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SesConfigurationSetName}'
+            Condition:
+              StringEquals:
+                ses:FromAddress: !Ref MailFromEmail
 
 Outputs:
   SqsSendQueueUrl:

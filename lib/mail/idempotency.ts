@@ -5,9 +5,17 @@ import { logDuplicado, logIdempotenciaConflicto, logSuprimido } from '@/lib/mail
 
 type Adjuntos = { filename: string; contentType: string; contentBase64: string }[];
 
+type RemitenteHash = {
+  /** Dirección canónica, solo si no es el remitente configurado. */
+  desde?: string;
+  /** Nombre visible, solo si no es el configurado. */
+  nombreRemitente?: string;
+};
+
 export type HashableRequest =
-  | { email: string; asunto: string; cuerpo: string; adjuntos: Adjuntos }
-  | { email: string; tipo: string; data: unknown; nombre?: string; adjuntos: Adjuntos };
+  | ({ email: string; asunto: string; cuerpo: string; adjuntos: Adjuntos } & RemitenteHash)
+  | ({ email: string; tipo: string; data: unknown; nombre?: string; adjuntos: Adjuntos } &
+      RemitenteHash);
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
@@ -34,6 +42,8 @@ export function computeRequestHash(req: HashableRequest): string {
   const normalized = {
     email: req.email.trim().toLowerCase(),
     ...contenido,
+    ...(req.desde ? { desde: req.desde } : {}),
+    ...(req.nombreRemitente ? { nombreRemitente: req.nombreRemitente } : {}),
     adjuntos: req.adjuntos.map((a) => ({
       filename: a.filename,
       contentType: a.contentType.toLowerCase(),

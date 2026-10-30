@@ -1,6 +1,7 @@
 # Infraestructura de AWS: colas SQS, eventos de SES e IAM
 
-Todo va en `eu-central-1`, la misma región que SES y el tópico SNS del configuration set.
+La región principal es `eu-central-1` (SES, el tópico SNS y las colas).
+La de respaldo recomendada es `eu-west-1`: el servicio la usa sola si Fráncfort no responde.
 La plantilla [infra/sqs.yml](../infra/sqs.yml) crea las colas, la suscripción, los usuarios
 IAM y las alarmas. Abajo están los pasos, lo que la plantilla no cubre y cómo verificar.
 
@@ -77,10 +78,10 @@ aws iam create-access-key --user-name mail-worker
   y dueño el usuario que corre Docker.
 - Rotarlas cada 90 días: crear la nueva, cambiar el archivo, reiniciar el contenedor y borrar la anterior
   con `aws iam delete-access-key`.
-- El contenedor `web` usa `mail-api`; el `worker`, `mail-worker`. Si `MAIL_PROVIDER=ses` (SMTP), el
-  worker sigue usando las credenciales SMTP de SES para enviar.
-- `web` necesita las credenciales de `mail-api` aunque se envíe por SMTP: con ellas quita
-  direcciones de la lista de supresión de SES al reactivar y muestra el estado de SES en `/sistemas`.
+- El contenedor `web` usa `mail-api`; el `worker`, `mail-worker`. Los dos envían por la API de SES
+  (`ses-api`) con esas claves. `ses` (SMTP) solo aplica si se vuelve a ese modo.
+- `web` usa las claves de `mail-api` también para quitar direcciones de la lista de supresión
+  de SES al reactivar y para mostrar el estado de SES en `/sistemas`.
 
 ### Transición del webhook
 
@@ -224,3 +225,65 @@ la quita también de la lista de SES; si falla, lo avisa y queda registrado en e
 - **`mail-events-dlq`:** normalmente son eventos de mails que no están en la base (por ejemplo,
   enviados desde otra aplicación con el mismo configuration set). Revisarlos con
   `aws sqs receive-message` y borrarlos a mano; se retienen 14 días.
+
+## 7. Región de respaldo (`eu-west-1`)
+
+Con las variables de respaldo cargadas no hay que cambiar de región a mano:
+
+- El envío por `ses-api` lleva `SES_ENDPOINT_ID`. SES reparte el tráfico entre las dos regiones y, si una se degrada, manda todo a la otra.
+- Si `mail-send` de Fráncfort no responde en 8 segundos, el servicio encola en `mail-send` de Irlanda. El worker lee las dos colas.
+- El worker lee las dos colas de eventos y acepta los dos tópicos SNS. El webhook también.
+- Los mensajes que ya estaban en una cola caída se procesan cuando esa región vuelve. La otra cola no los ve.
+
+El envío ya es `ses-api`. Con `SES_ENDPOINT_ID`, SES reparte entre las dos regiones. El modo `ses` (SMTP) no usa ese punto de conexión.
+
+### Qué hay que crear en Irlanda antes del stack
+
+1. Pedir acceso de producción y la misma cuota que en Fráncfort. En un corte, todo el volumen va a una sola región.
+2. En SES, consola de Fráncfort → Global endpoints → crear uno con secundaria `eu-west-1`. Copiar el Endpoint ID a `SES_ENDPOINT_ID`.
+3. Desde esa misma pantalla, duplicar el configuration set y la identidad `lujandecuyo.gob.ar`. Easy DKIM determinístico reutiliza los CNAME que ya existen.
+4. A mano en Irlanda, porque la duplicación no los copia:
+   - destino de eventos del configuration set hacia un tópico SNS **de `eu-west-1`**, con los mismos tipos de evento que en Fráncfort;
+   - MAIL FROM en otro subdominio (el MX de `bounce` apunta solo a Fráncfort):
+
+| Nombre | Tipo | Valor |
+| --- | --- | --- |
+| `bounce-dub.lujandecuyo.gob.ar` | MX (prioridad 10) | `feedback-smtp.eu-west-1.amazonses.com` |
+| `bounce-dub.lujandecuyo.gob.ar` | TXT | `v=spf1 include:amazonses.com ~all` |
+
+La lista de supresión no se copia: hay que volver a cargar en Irlanda las direcciones que ya estén suprimidas en Fráncfort.
+
+### Colas
+
+El stack de Fráncfort ya creó `mail-api` y `mail-worker`. En Irlanda se despliegan solo las colas y se suman políticas a esos usuarios (`CreateIamUsers=false`). El tópico SNS de Irlanda tiene que existir antes.
+
+```bash
+aws cloudformation deploy \
+  --region eu-west-1 \
+  --stack-name mail-service-queues \
+  --template-file infra/sqs.yml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+      CreateIamUsers=false \
+      SesSnsTopicArn=arn:aws:sns:eu-west-1:<cuenta>:<topico-ses> \
+      SesConfigurationSetName=<configuration-set> \
+      MailFromEmail=no-reply@lujandecuyo.gob.ar \
+      AlarmEmail=sistemas@lujandecuyo.gob.ar
+```
+
+Confirmar el mail de las alarmas otra vez: es una suscripción distinta.
+
+### Variables
+
+En `.env.web` y `.env.worker`, además de las de Fráncfort:
+
+```bash
+AWS_REGION_SECONDARY=eu-west-1
+SES_ENDPOINT_ID=<endpoint-id>
+SES_SNS_TOPIC_ARN_SECONDARY=arn:aws:sns:eu-west-1:<cuenta>:<topico-ses>
+SQS_SEND_QUEUE_URL_SECONDARY=<salida SqsSendQueueUrl>
+SQS_SEND_DLQ_URL_SECONDARY=<salida SqsSendDlqUrl>
+SQS_EVENTS_QUEUE_URL_SECONDARY=<salida SqsEventsQueueUrl>
+```
+
+Reiniciar web y worker. La región de cada cola sale de su URL: el cliente de Fráncfort no se usa para leer Irlanda.

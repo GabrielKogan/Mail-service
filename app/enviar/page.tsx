@@ -96,6 +96,8 @@ export default function EnviarPage() {
   const [origen, setOrigen] = useState('');
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
+  const [desde, setDesde] = useState('');
+  const [nombreRemitente, setNombreRemitente] = useState('');
   const [asunto, setAsunto] = useState('');
   const [cuerpo, setCuerpo] = useState('<p></p>');
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -159,7 +161,13 @@ export default function EnviarPage() {
     try {
       const res = await apiFetch('/api/admin/plantillas/preview', {
         method: 'POST',
-        body: JSON.stringify({ tipo, data, nombre }),
+        body: JSON.stringify({
+          tipo,
+          data,
+          nombre,
+          desde: desde.trim() || undefined,
+          nombre_remitente: nombreRemitente.trim() || undefined,
+        }),
       });
       const json = (await res.json()) as Preview | SendErr;
       if (!res.ok) {
@@ -201,10 +209,14 @@ export default function EnviarPage() {
         return;
       }
       const adjuntos = await Promise.all(files.map(fileToAdjunto));
+      const remitente = {
+        ...(desde.trim() ? { desde: desde.trim() } : {}),
+        ...(nombreRemitente.trim() ? { nombre_remitente: nombreRemitente.trim() } : {}),
+      };
       const payload =
         modo === 'plantilla'
-          ? { email, nombre, tipo, data, origen: origen || undefined, adjuntos }
-          : { email, nombre, asunto, cuerpo, origen: origen || undefined, adjuntos };
+          ? { email, nombre, tipo, data, origen: origen || undefined, ...remitente, adjuntos }
+          : { email, nombre, asunto, cuerpo, origen: origen || undefined, ...remitente, adjuntos };
       const res = await apiFetch('/api/mail', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -249,7 +261,8 @@ export default function EnviarPage() {
           DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos,{' '}
           {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB cada uno y{' '}
           {MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB en total. Si no elegís sistema,
-          el origen queda como <code>panel</code>.
+          el origen queda como <code>panel</code>. El buzón (<code>desde</code>) cambia la
+          dirección de salida, por ejemplo <code>turnos</code> o <code>rentas@lujandecuyo.gob.ar</code>.
         </p>
       </header>
 
@@ -265,6 +278,33 @@ export default function EnviarPage() {
               </option>
             ))}
           </select>
+        </label>
+
+        <label>
+          Buzón del remitente
+          <input
+            value={desde}
+            onChange={(e) => {
+              setDesde(e.target.value);
+              setPreview(null);
+            }}
+            placeholder="turnos o turnos@lujandecuyo.gob.ar"
+          />
+          <span className="muted">
+            Vacío usa el remitente del servicio. El dominio tiene que ser el configurado.
+          </span>
+        </label>
+        <label>
+          Nombre visible del remitente
+          <input
+            value={nombreRemitente}
+            onChange={(e) => {
+              setNombreRemitente(e.target.value);
+              setPreview(null);
+            }}
+            placeholder="Turnos"
+          />
+          <span className="muted">Lo que ve el destinatario junto a la dirección.</span>
         </label>
 
         <div className="actions" style={{ marginTop: 0 }}>
@@ -396,7 +436,7 @@ export default function EnviarPage() {
           />
         </label>
         <label>
-          Nombre
+          Nombre del destinatario
           <input value={nombre} onChange={(e) => setNombre(e.target.value)} />
         </label>
         <label>

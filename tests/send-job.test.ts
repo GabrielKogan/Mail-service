@@ -15,6 +15,7 @@ type Log = {
   sistemaId: number | null;
   errorDetalle: string | null;
   fechaIntento: Date | null;
+  remitente?: string;
 };
 
 const h = vi.hoisted(() => {
@@ -142,6 +143,13 @@ describe('processSendJob', () => {
       { evento: 'enviando', detalle: { intento: 1 } },
       { evento: 'reintento', detalle: { intento: 1, detalle: expect.stringContaining('Throttling') } },
     ]);
+  });
+
+  it('usa el buzón y el nombre guardados en el registro', async () => {
+    seed({ remitente: '"Turnos" <turnos@lujandecuyo.gob.ar>' });
+    await processSendJob(1);
+    const msg = h.send.last as { from?: { email: string; name: string } };
+    expect(msg.from).toEqual({ email: 'turnos@lujandecuyo.gob.ar', name: 'Turnos' });
   });
 
   it('manda Feedback-ID y el pie de baja en texto', async () => {

@@ -62,6 +62,19 @@ describe('verifySnsMessage', () => {
     expect(await verifySnsMessage(env, TOPIC, fetcher)).toMatchObject({ ok: false, reason: 'TopicArn no permitido' });
   });
 
+  it('acepta el tópico de la región de respaldo y rechaza un tercero', async () => {
+    const secondary = 'arn:aws:sns:eu-west-1:123456789012:mail-service-events';
+    const fromIreland = signed({
+      TopicArn: secondary,
+      SigningCertURL: 'https://sns.eu-west-1.amazonaws.com/SimpleNotificationService-abc.pem',
+    });
+    expect(await verifySnsMessage(fromIreland, [TOPIC, secondary], fetcher)).toEqual({ ok: true });
+    expect(await verifySnsMessage(signed(), [secondary], fetcher)).toMatchObject({
+      ok: false,
+      reason: 'TopicArn no permitido',
+    });
+  });
+
   it('rechaza todo si no hay tópico configurado', async () => {
     expect(await verifySnsMessage(signed(), undefined, fetcher)).toMatchObject({ ok: false });
   });

@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { config } from '@/lib/config';
 import { mailErrorMessage } from '@/lib/mail';
-import { getMailFrom } from '@/lib/mail/from';
+import { formatRemitente, remitenteEnHash, resolveMailFrom } from '@/lib/mail/from';
 import {
   findActiveSuppression,
   suppressionErrorDetail,
@@ -99,6 +99,24 @@ export async function POST(req: NextRequest) {
     return reply(formatValidationFailure(parsed.error), { status: 400 });
   }
 
+  const elegido = resolveMailFrom({
+    desde: parsed.data.desde,
+    nombre: parsed.data.nombre_remitente,
+  });
+  if (!elegido.ok) {
+    return reply(
+      {
+        ok: false,
+        codigo: 'remitente_invalido',
+        error: elegido.error,
+        detalle: elegido.detalle,
+        log: `Rechazado: ${elegido.detalle}`,
+      },
+      { status: 400 }
+    );
+  }
+  const marcaRemitente = remitenteEnHash(elegido.identity);
+
   const resolved = await resolveOrigin(caller, parsed.data.origen);
   if (!resolved.ok) {
     const codigo = resolved.status === 403 ? 'origen_no_coincide' : 'datos_invalidos';
@@ -171,7 +189,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rendered = renderPlantilla(plantilla, data.data, nombre);
+    const rendered = renderPlantilla(plantilla, data.data, nombre, {
+      consultas: elegido.identity.email,
+    });
     asunto = rendered.asunto;
     html = rendered.html;
     texto = filenames.length
@@ -179,7 +199,7 @@ export async function POST(req: NextRequest) {
       : rendered.texto;
     tipo = rendered.tipo;
     plantillaVersion = rendered.version;
-    hashable = { email, tipo, data: data.data, nombre, adjuntos };
+    hashable = { email, tipo, data: data.data, nombre, adjuntos, ...marcaRemitente };
   } else {
     if (sistema && !sistema.permiteRawHtml) {
       return reply(
@@ -195,11 +215,11 @@ export async function POST(req: NextRequest) {
     }
     asunto = parsed.data.asunto!;
     html = parsed.data.cuerpo!;
-    hashable = { email, asunto, cuerpo: html, adjuntos };
+    hashable = { email, asunto, cuerpo: html, adjuntos, ...marcaRemitente };
   }
 
   const sistemaId = sistema?.sistemaId ?? null;
-  const remitente = getMailFrom().email;
+  const remitente = formatRemitente(elegido.identity);
   const cuerpoLog = cuerpoConAdjuntos(html, filenames);
 
   // Sin sistema (token viejo con un origen no registrado) la clave no tiene ámbito y se ignora.
@@ -348,6 +368,8 @@ export async function POST(req: NextRequest) {
         id: logId,
         estado: 'en_cola',
         adjuntos: filenames,
+        remitente: elegido.identity.email,
+        nombre_remitente: elegido.identity.name,
         log: logEncolado({ id: logId, email, adjuntos: filenames }),
       },
       { status: 202 }
@@ -376,6 +398,8 @@ export async function POST(req: NextRequest) {
         estado: 'enviado',
         messageId: result.messageId,
         adjuntos: filenames,
+        remitente: elegido.identity.email,
+        nombre_remitente: elegido.identity.name,
         log: logEnviado({ id: logId, email, messageId: result.messageId, adjuntos: filenames }),
       });
     case 'suppressed':
@@ -398,6 +422,8 @@ export async function POST(req: NextRequest) {
           id: logId,
           estado: 'en_cola',
           adjuntos: filenames,
+          remitente: elegido.identity.email,
+          nombre_remitente: elegido.identity.name,
           log: logEncolado({ id: logId, email, adjuntos: filenames }),
         },
         { status: 202 }

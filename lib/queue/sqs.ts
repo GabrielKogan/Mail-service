@@ -6,18 +6,30 @@ import {
   SQSClient,
   type Message,
 } from '@aws-sdk/client-sqs';
+import { regionFromQueueUrl } from '@/lib/aws/queue-url';
 import { config } from '@/lib/config';
 
-let client: SQSClient | null = null;
+const ENQUEUE_TIMEOUT_MS = 8_000;
 
-/** Credenciales por la cadena estándar del SDK (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY). */
-export function sqsClient(): SQSClient {
-  client ??= new SQSClient({ region: config().awsRegion });
+const clients = new Map<string, SQSClient>();
+let testClient: SQSClient | null = null;
+
+/** Cliente de la región que indica la URL. Cada región tiene el suyo. */
+export function sqsClientFor(queueUrl: string): SQSClient {
+  if (testClient) return testClient;
+  const region = regionFromQueueUrl(queueUrl) ?? config().awsRegion;
+  if (!region) throw new Error(`No se pudo determinar la región de la cola ${queueUrl}`);
+  let client = clients.get(region);
+  if (!client) {
+    client = new SQSClient({ region });
+    clients.set(region, client);
+  }
   return client;
 }
 
 export function setSqsClientForTests(c: SQSClient | null): void {
-  client = c;
+  testClient = c;
+  clients.clear();
 }
 
 export type SendJobMessage = { mailLogId: number };
@@ -27,19 +39,43 @@ export async function enqueue(
   body: unknown,
   opts: { delaySeconds?: number } = {}
 ): Promise<void> {
-  await sqsClient().send(
+  await sqsClientFor(queueUrl).send(
     new SendMessageCommand({
       QueueUrl: queueUrl,
       MessageBody: JSON.stringify(body),
       DelaySeconds: opts.delaySeconds,
-    })
+    }),
+    { abortSignal: AbortSignal.timeout(ENQUEUE_TIMEOUT_MS) }
   );
 }
 
+/** Colas de envío: la principal y, si está configurada, la de respaldo. */
+export function sendQueueUrls(): string[] {
+  const { sqsSendQueueUrl, sqsSendQueueUrlSecondary } = config();
+  return [sqsSendQueueUrl, sqsSendQueueUrlSecondary].filter((url): url is string => Boolean(url));
+}
+
+/**
+ * Encola en la región principal. Si no responde, usa la de respaldo.
+ * El worker lee las dos, y el envío real lo toma una sola vez.
+ */
 export async function enqueueSendJob(mailLogId: number): Promise<void> {
-  const url = config().sqsSendQueueUrl;
-  if (!url) throw new Error('SQS_SEND_QUEUE_URL no está configurado');
-  await enqueue(url, { mailLogId } satisfies SendJobMessage);
+  const urls = sendQueueUrls();
+  if (!urls.length) throw new Error('SQS_SEND_QUEUE_URL no está configurado');
+  let last: unknown;
+  for (const url of urls) {
+    try {
+      await enqueue(url, { mailLogId } satisfies SendJobMessage);
+      if (url !== urls[0]) console.warn('[sqs] envío encolado en la región de respaldo');
+      return;
+    } catch (err) {
+      last = err;
+      if (urls.length > 1) {
+        console.warn('[sqs] no se pudo encolar', err instanceof Error ? err.message : err);
+      }
+    }
+  }
+  throw last instanceof Error ? last : new Error('No se pudo encolar el envío');
 }
 
 export type ReceivedMessage = {
@@ -64,7 +100,7 @@ export async function receiveBatch(
   queueUrl: string,
   opts: { max?: number; waitSeconds?: number; abortSignal?: AbortSignal } = {}
 ): Promise<ReceivedMessage[]> {
-  const res = await sqsClient().send(
+  const res = await sqsClientFor(queueUrl).send(
     new ReceiveMessageCommand({
       QueueUrl: queueUrl,
       MaxNumberOfMessages: Math.min(10, Math.max(1, opts.max ?? 10)),
@@ -77,14 +113,14 @@ export async function receiveBatch(
 }
 
 export async function deleteMessage(queueUrl: string, receiptHandle: string): Promise<void> {
-  await sqsClient().send(
+  await sqsClientFor(queueUrl).send(
     new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: receiptHandle })
   );
 }
 
 async function delayRetry(queueUrl: string, receiptHandle: string, seconds: number): Promise<void> {
   try {
-    await sqsClient().send(
+    await sqsClientFor(queueUrl).send(
       new ChangeMessageVisibilityCommand({
         QueueUrl: queueUrl,
         ReceiptHandle: receiptHandle,

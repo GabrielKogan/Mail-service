@@ -84,6 +84,17 @@ export const enviarMailSchema = z
     data: z.record(z.string(), z.unknown()).optional(),
     /** Con clave de sistema es opcional: si se manda, tiene que coincidir con la credencial. */
     origen: z.string().max(120).optional(),
+    /**
+     * Buzón del remitente: `turnos` o `turnos@dominio`.
+     * El dominio tiene que ser el de MAIL_FROM_EMAIL. Vacío = el remitente configurado.
+     */
+    desde: z.string().max(320).optional(),
+    /** Nombre visible del remitente. Vacío = MAIL_FROM_NAME. */
+    nombre_remitente: z
+      .string()
+      .max(120)
+      .regex(sinSaltos, 'El nombre del remitente no puede tener saltos de línea')
+      .optional(),
     /** Misma clave y mismo contenido devuelven el envío original sin reenviar. */
     idempotency_key: z
       .string()

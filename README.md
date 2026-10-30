@@ -47,19 +47,20 @@ base vacía auxiliar (p. ej. `MAIL_QUEUE_SHADOW`). En producción solo se usa `p
 
 ## Proveedor de envío
 
-`MAIL_PROVIDER` elige el adaptador (`lib/mail/providers`). Default: `ses`.
+`MAIL_PROVIDER` elige el adaptador (`lib/mail/providers`). Default: `ses-api`.
 
 | Valor | Qué usa |
 | --- | --- |
 | `ses` | SES por SMTP (credenciales SMTP de SES). Configuration set y etiquetas van como headers `X-SES-*`. |
-| `ses-api` | SES por API v2 (`SendEmail` Raw) con las credenciales IAM. Recomendado con el worker: distingue errores reintentables. |
+| `ses-api` | SES por API v2 (`SendEmail` Raw) con las credenciales IAM. Recomendado con el worker: distingue errores reintentables. Con `SES_ENDPOINT_ID`, SES reparte el envío entre `AWS_REGION` y `AWS_REGION_SECONDARY`. |
 | `brevo` | API de Brevo (`BREVO_API_KEY`). |
 | `smtp` | Otro relay SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`). |
 
-Para SES: verificar el dominio o el remitente (`MAIL_FROM_EMAIL`) en la misma región que
-`AWS_REGION`. Por SMTP, `SMTP_USER` es el SMTP Username (empieza con `AKIA`) y `SMTP_PASS`
-la contraseña SMTP, no el Secret Access Key de IAM. Mientras la cuenta esté en sandbox,
-solo se entrega a direcciones verificadas.
+El envío usa la API de SES (`ses-api`) con las claves IAM de `mail-api` y `mail-worker`, en la
+región `AWS_REGION`. El dominio o el remitente (`MAIL_FROM_EMAIL`) tiene que estar verificado
+ahí. `ses` queda para volver a SMTP: `SMTP_USER` es el SMTP Username (empieza con `AKIA`) y
+`SMTP_PASS` es la contraseña SMTP, no el Secret Access Key de IAM. Mientras la cuenta esté en
+sandbox, solo se entrega a direcciones verificadas.
 
 `SES_MAX_SEND_RATE` limita los envíos por segundo de cada proceso (token bucket). Dejarlo un
 poco por debajo del límite de la cuenta.
@@ -97,6 +98,7 @@ curl -X POST https://mail.ejemplo.gob.ar/api/mail \
   -H "x-api-key: $MAIL_SERVICE_API_KEY" \
   -d '{"email":"vecino@ejemplo.com","nombre":"Nombre","tipo":"turno_confirmacion",
        "data":{"area":"Registro Civil","fecha":"25/09/2026","hora":"10:00","lugar":"San Martín 50"},
+       "desde":"turnos","nombre_remitente":"Turnos",
        "idempotency_key":"turno-12345-confirmacion"}'
 ```
 
@@ -109,7 +111,9 @@ Tipos: `turno_confirmacion`, `turno_recordatorio` (solo `turnos`), `expediente_a
 | `email` | obligatorio |
 | `tipo` + `data` | plantilla (recomendado) |
 | `asunto` + `cuerpo` | HTML libre, solo si el sistema lo permite. No se mezclan con `tipo` |
-| `nombre` | opcional; lo usa el saludo de la plantilla |
+| `nombre` | opcional; nombre del destinatario, lo usa el saludo de la plantilla |
+| `desde` | opcional; buzón del remitente (`turnos` o `turnos@lujandecuyo.gob.ar`). El dominio tiene que ser el de `MAIL_FROM_EMAIL`. Vacío usa ese remitente. Otro dominio: 400 `remitente_invalido` |
+| `nombre_remitente` | opcional; nombre visible (por ejemplo `Turnos`). Vacío usa `MAIL_FROM_NAME` |
 | `idempotency_key` | recomendado: único por mail lógico, `^[A-Za-z0-9._:-]+$`, hasta 200 |
 | `origen` | opcional; si se manda distinto al de la clave, 403 |
 | `adjuntos` | hasta 15, 20 MB c/u y 28 MB en total: PDF, DOC, DOCX, PNG, JPG, GIF, WEBP |
@@ -122,7 +126,7 @@ cliente (destinatario, id, archivos y el límite que se pasó). No trae el base6
 | **200** | Enviado (`MAIL_SEND_MODE=sync`): `{ ok, codigo: "enviado", id, estado, messageId, log }` |
 | **202** | En cola (`MAIL_SEND_MODE=queue`): `{ ok, codigo: "encolado", id, estado: "en_cola", log }` |
 | 200/202 con `duplicado: true` | Misma `idempotency_key` y mismo contenido: `codigo: "duplicado"`, no se reenvía |
-| **400** | `json_invalido`, `datos_invalidos`, `plantilla_inexistente`, `plantilla_invalida`, o un adjunto: `tipo_adjunto_no_permitido`, `nombre_archivo_invalido`, `adjunto_vacio`, `adjunto_demasiado_grande`, `demasiados_adjuntos`, `adjuntos_total_excedido`. Si fallan varios archivos, `codigo` es el de mayor prioridad y `log` nombra todos |
+| **400** | `json_invalido`, `datos_invalidos`, `remitente_invalido`, `plantilla_inexistente`, `plantilla_invalida`, o un adjunto: `tipo_adjunto_no_permitido`, `nombre_archivo_invalido`, `adjunto_vacio`, `adjunto_demasiado_grande`, `demasiados_adjuntos`, `adjuntos_total_excedido`. Si fallan varios archivos, `codigo` es el de mayor prioridad y `log` nombra todos |
 | **401** | `no_autorizado`: sin clave o clave inválida/revocada |
 | **403** | `origen_no_coincide`, `html_libre_no_permitido` o `plantilla_no_permitida` |
 | **409** | `idempotencia_conflicto`: misma clave, otro contenido |
@@ -208,7 +212,7 @@ cuenta de SES si está activa. Cada bloqueo y cada reactivación quedan en
 
 1. Configuration set con los eventos Send, Delivery, Bounce, Complaint, Reject,
    Rendering Failure, Delivery Delay y Open, publicados a un tópico SNS.
-2. `SES_CONFIGURATION_SET` y `SES_SNS_TOPIC_ARN` en el `.env`.
+2. `SES_CONFIGURATION_SET` y `SES_SNS_TOPIC_ARN` en el `.env`. Si hay región de respaldo, también `SES_SNS_TOPIC_ARN_SECONDARY`: el worker y el webhook aceptan los dos tópicos.
 3. Entrega de los eventos:
    - **Cola (recomendado):** SNS → SQS `mail-events` → worker. Ver [docs/aws-setup.md](docs/aws-setup.md).
    - **Webhook:** SNS → HTTPS `POST /api/webhooks/ses`. Solo acepta mensajes con firma SNS

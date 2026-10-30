@@ -40,8 +40,8 @@ export function saludo(nombre: string): string {
   return n ? `Hola ${n},` : 'Hola,';
 }
 
-export function renderHtml(c: Contenido, nombre: string): string {
-  const from = getMailFrom();
+export function renderHtml(c: Contenido, nombre: string, consultas?: string): string {
+  const fromEmail = consultas ?? getMailFrom().email;
   const datos = c.datos?.length
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;border-collapse:collapse">${c.datos
         .map(
@@ -73,13 +73,13 @@ export function renderHtml(c: Contenido, nombre: string): string {
 ${c.parrafos.map(parrafoHtml).join('')}
 ${datos}${lista}${accion}${nota}
 </div>
-<p style="margin:16px 0 0;font-size:12px;color:#667;text-align:center">${MUNICIPIO} · <a href="${SITIO}" style="color:#667">${SITIO.replace('https://', '')}</a> · Consultas: ${escapeHtml(from.email)}</p>
+<p style="margin:16px 0 0;font-size:12px;color:#667;text-align:center">${MUNICIPIO} · <a href="${SITIO}" style="color:#667">${SITIO.replace('https://', '')}</a> · Consultas: ${escapeHtml(fromEmail)}</p>
 </div>
 </body></html>`;
 }
 
-export function renderTexto(c: Contenido, nombre: string): string {
-  const from = getMailFrom();
+export function renderTexto(c: Contenido, nombre: string, consultas?: string): string {
+  const fromEmail = consultas ?? getMailFrom().email;
   const partes: string[] = [c.titulo, '', saludo(nombre), ''];
   for (const p of c.parrafos) partes.push(p.trim(), '');
   if (c.datos?.length) {
@@ -92,6 +92,6 @@ export function renderTexto(c: Contenido, nombre: string): string {
   }
   if (c.accion) partes.push(`${c.accion.texto}: ${c.accion.url}`, '');
   if (c.nota) partes.push(c.nota, '');
-  partes.push('--', MUNICIPIO, SITIO, `Consultas: ${from.email}`);
+  partes.push('--', MUNICIPIO, SITIO, `Consultas: ${fromEmail}`);
   return partes.join('\n');
 }

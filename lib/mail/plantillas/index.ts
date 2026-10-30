@@ -47,14 +47,19 @@ function unaLinea(s: string): string {
   return s.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
-export function renderPlantilla(p: Plantilla, data: PlantillaData, nombre: string): PlantillaRender {
+export function renderPlantilla(
+  p: Plantilla,
+  data: PlantillaData,
+  nombre: string,
+  opts?: { consultas?: string }
+): PlantillaRender {
   const contenido = p.contenido(data);
   return {
     tipo: p.tipo,
     version: p.version,
     asunto: unaLinea(p.asunto(data)),
-    html: renderHtml(contenido, nombre),
-    texto: renderTexto(contenido, nombre),
+    html: renderHtml(contenido, nombre, opts?.consultas),
+    texto: renderTexto(contenido, nombre, opts?.consultas),
   };
 }
 

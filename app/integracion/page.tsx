@@ -4,7 +4,9 @@ const campos = [
   ['email', 'Obligatorio'],
   ['tipo + data', 'Plantilla. Es la forma recomendada. GET /api/plantillas lista tipos, campos y un ejemplo de data.'],
   ['asunto + cuerpo', 'HTML libre, solo si el sistema lo tiene habilitado. No se mezcla con tipo.'],
-  ['nombre', 'Opcional. Lo usa el saludo de la plantilla.'],
+  ['nombre', 'Opcional. Lo usa el saludo de la plantilla. Es el nombre del destinatario.'],
+  ['desde', 'Opcional. Cambia el buzón: turnos o turnos@lujandecuyo.gob.ar. El dominio tiene que ser el de MAIL_FROM_EMAIL. Vacío usa el remitente del servicio. Otro dominio responde 400 remitente_invalido.'],
+  ['nombre_remitente', 'Opcional. Nombre visible junto a la dirección (por ejemplo Turnos). Vacío usa MAIL_FROM_NAME. No admite saltos de línea ni < > ".'],
   ['idempotency_key', 'Única por mail lógico. Letras, números y . _ : -, hasta 200 caracteres. El reintento usa la misma.'],
   ['origen', 'Opcional. Si no coincide con la clave, la API responde 403 origen_no_coincide.'],
   ['adjuntos', 'Hasta 15 archivos, 20 MB cada uno y 28 MB en total. PDF, DOC, DOCX, PNG, JPG, GIF o WEBP, en contentBase64 sin el prefijo data:.'],
@@ -14,7 +16,7 @@ const respuestas = [
   ['200', 'enviado', 'El proveedor aceptó el mail (modo sync). Trae id, estado, messageId y log.'],
   ['202', 'encolado', 'Quedó registrado para el worker. El log no afirma que la cola ya lo haya tomado.'],
   ['200 / 202', 'duplicado', 'La misma idempotency_key y el mismo contenido: no se reenvía. El log dice el id y el estado del original.'],
-  ['400', 'json_invalido, datos_invalidos, plantilla_inexistente, plantilla_invalida o un adjunto', 'Si fallan varios archivos, codigo es el de mayor prioridad y log nombra todos.'],
+  ['400', 'json_invalido, datos_invalidos, remitente_invalido, plantilla_inexistente, plantilla_invalida o un adjunto', 'Si fallan varios archivos, codigo es el de mayor prioridad y log nombra todos. remitente_invalido: el buzón no es del dominio configurado.'],
   ['401', 'no_autorizado', 'Falta la clave, está revocada o el sistema está inactivo.'],
   ['403', 'origen_no_coincide, html_libre_no_permitido, plantilla_no_permitida', 'La clave no autoriza ese origen, el HTML libre o esa plantilla.'],
   ['409', 'idempotencia_conflicto', 'La misma clave se usó con otro contenido. Es un error de integración.'],
@@ -93,6 +95,7 @@ export default function IntegracionPage() {
   -H "x-api-key: $MAIL_SERVICE_API_KEY" \\
   -d '{"email":"vecino@ejemplo.com","nombre":"Nombre","tipo":"turno_confirmacion",
        "data":{"area":"Registro Civil","fecha":"25/09/2026","hora":"10:00","lugar":"San Martín 50"},
+       "desde":"turnos","nombre_remitente":"Turnos",
        "idempotency_key":"turno-12345-confirmacion"}'`}</pre>
         </section>
 

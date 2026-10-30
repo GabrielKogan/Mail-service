@@ -12,6 +12,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     env: {
       NODE_ENV: 'test',
+      AWS_REGION: 'eu-central-1',
     },
   },
 });

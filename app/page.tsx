@@ -64,7 +64,10 @@ export default function HomePage() {
         </div>
         <p className="muted">
           La llamada sale del backend del sistema, con la clave en <span className="code">x-api-key</span>.
-          El origen lo define esa clave, no el cuerpo del request. La guía completa tiene los mismos
+          El origen lo define esa clave, no el cuerpo del request. Para salir como{' '}
+          <span className="code">turnos@</span> o <span className="code">rentas@</span>, el mismo
+          request manda <span className="code">desde</span> y, si hace falta,{' '}
+          <span className="code">nombre_remitente</span>. La guía completa tiene los mismos
           campos, códigos y ejemplos que el README.
         </p>
         <h3 className="card-title" style={{ marginTop: 14, fontSize: '1rem' }}>Plantillas y HTML libre</h3>

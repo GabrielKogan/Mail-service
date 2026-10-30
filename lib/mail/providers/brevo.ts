@@ -14,7 +14,7 @@ export class BrevoProvider implements MailProvider {
       throw new MailProviderError('Falta BREVO_API_KEY');
     }
 
-    const from = getMailFrom();
+    const from = message.from ?? getMailFrom();
     const payload: any = {
       sender: { name: from.name, email: from.email },
       to: [{ email: message.to, name: message.toName || message.to }],

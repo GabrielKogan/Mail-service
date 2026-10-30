@@ -42,7 +42,7 @@ export async function sendViaSmtp(
 ): Promise<MailSendResult> {
   const port = config.port ?? 587;
   const secure = smtpSecure(port);
-  const from = getMailFrom();
+  const from = message.from ?? getMailFrom();
   const transporter = nodemailer.createTransport({
     host: config.host,
     port,
@@ -53,7 +53,7 @@ export async function sendViaSmtp(
 
   try {
     const info = await transporter.sendMail({
-      from: `"${from.name}" <${from.email}>`,
+      from: { name: from.name, address: from.email },
       to: message.toName ? `"${message.toName}" <${message.to}>` : message.to,
       subject: message.subject,
       html: message.html,

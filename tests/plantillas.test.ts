@@ -23,6 +23,11 @@ describe('plantillas', () => {
     expect(r.texto).toContain('Hola Ana,');
     expect(r.texto).toContain('1<script>');
     expect(r.asunto).not.toMatch(/[\r\n]/);
+    const conBuzon = renderPlantilla(p, data.data, 'Ana', {
+      consultas: 'turnos@lujandecuyo.gob.ar',
+    });
+    expect(conBuzon.texto).toContain('Consultas: turnos@lujandecuyo.gob.ar');
+    expect(conBuzon.html).toContain('turnos@lujandecuyo.gob.ar');
   });
 
   it('rechaza data inválida', () => {

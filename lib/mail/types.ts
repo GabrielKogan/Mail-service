@@ -6,6 +6,8 @@ export type MailAttachment = {
 };
 
 export type MailMessage = {
+  /** Si no viene, se usa el remitente configurado (`MAIL_FROM_*`). */
+  from?: { email: string; name: string };
   to: string;
   toName: string;
   subject: string;

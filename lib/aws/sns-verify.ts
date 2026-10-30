@@ -100,15 +100,21 @@ export function clearSnsCertCache(): void {
  * Verifica que el mensaje venga de SNS y del tópico permitido.
  * Ver https://docs.aws.amazon.com/sns/latest/dg/sns-verify-signature-of-message.html
  */
+function asTopicList(allowed: string | readonly string[] | undefined): string[] {
+  if (!allowed) return [];
+  return (typeof allowed === 'string' ? [allowed] : allowed).filter((topic) => topic.length > 0);
+}
+
 export async function verifySnsMessage(
   envelope: SnsEnvelope,
-  allowedTopicArn: string | undefined,
+  allowedTopicArn: string | readonly string[] | undefined,
   fetcher: CertFetcher = defaultFetcher
 ): Promise<SnsVerifyResult> {
-  if (!allowedTopicArn) {
+  const allowed = asTopicList(allowedTopicArn);
+  if (!allowed.length) {
     return { ok: false, reason: 'SES_SNS_TOPIC_ARN no está configurado' };
   }
-  if (envelope.TopicArn !== allowedTopicArn) {
+  if (!envelope.TopicArn || !allowed.includes(envelope.TopicArn)) {
     return { ok: false, reason: 'TopicArn no permitido' };
   }
 

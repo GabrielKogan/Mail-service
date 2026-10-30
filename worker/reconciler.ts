@@ -125,11 +125,7 @@ async function recordEvents(ids: number[], evento: InternalEvento): Promise<void
   }
 }
 
-/** Vacía `mail-send-dlq`: marca como error los registros que siguen en cola y borra los mensajes. */
-export async function drainSendDlq(): Promise<number> {
-  const url = config().sqsSendDlqUrl;
-  if (!url) return 0;
-
+async function drainOneSendDlq(url: string): Promise<number> {
   let total = 0;
   for (;;) {
     const batch = await receiveBatch(url, { max: 10, waitSeconds: 0 });
@@ -151,6 +147,22 @@ export async function drainSendDlq(): Promise<number> {
       }
       await deleteMessage(url, msg.receiptHandle);
       total++;
+    }
+  }
+  return total;
+}
+
+/** Vacía las colas de fallidos de envío (principal y, si existe, la de respaldo). */
+export async function drainSendDlq(): Promise<number> {
+  const urls = [config().sqsSendDlqUrl, config().sqsSendDlqUrlSecondary].filter(
+    (url): url is string => Boolean(url)
+  );
+  let total = 0;
+  for (const url of urls) {
+    try {
+      total += await drainOneSendDlq(url);
+    } catch (err) {
+      console.error('[worker:dlq] no se pudo leer la cola de fallidos', err);
     }
   }
   return total;

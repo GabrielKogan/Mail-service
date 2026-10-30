@@ -36,9 +36,13 @@ async function main(): Promise<void> {
   const iniciado = new Date();
   const pollers: Poller[] = [];
 
-  if (cfg.sqsSendQueueUrl) {
+  const sendUrls = [cfg.sqsSendQueueUrl, cfg.sqsSendQueueUrlSecondary].filter((url): url is string => Boolean(url));
+  if (!sendUrls.length) {
+    console.warn('[worker] SQS_SEND_QUEUE_URL no está configurado: no se procesan envíos');
+  }
+  for (const url of sendUrls) {
     pollers.push(
-      poll(cfg.sqsSendQueueUrl, handleSendMessage, {
+      poll(url, handleSendMessage, {
         concurrency: cfg.workerConcurrency,
         retryDelaySeconds: sendRetryDelaySeconds,
         onError: (err, msg) => {
@@ -50,13 +54,17 @@ async function main(): Promise<void> {
         },
       })
     );
-  } else {
-    console.warn('[worker] SQS_SEND_QUEUE_URL no está configurado: no se procesan envíos');
   }
 
-  if (cfg.sqsEventsQueueUrl) {
+  const eventUrls = [cfg.sqsEventsQueueUrl, cfg.sqsEventsQueueUrlSecondary].filter(
+    (url): url is string => Boolean(url)
+  );
+  if (!eventUrls.length) {
+    console.warn('[worker] SQS_EVENTS_QUEUE_URL no está configurado: no se procesan eventos');
+  }
+  for (const url of eventUrls) {
     pollers.push(
-      poll(cfg.sqsEventsQueueUrl, handleEventMessage, {
+      poll(url, handleEventMessage, {
         concurrency: cfg.workerConcurrency,
         onError: (err, msg) => {
           if (err instanceof UnmatchedEventError) {
@@ -68,8 +76,6 @@ async function main(): Promise<void> {
         },
       })
     );
-  } else {
-    console.warn('[worker] SQS_EVENTS_QUEUE_URL no está configurado: no se procesan eventos');
   }
 
   const timers = [
@@ -102,7 +108,9 @@ async function main(): Promise<void> {
   ];
 
   console.log(
-    `[worker] ${name} iniciado (proveedor ${cfg.mailProvider}, concurrencia ${cfg.workerConcurrency}, ${cfg.sesMaxSendRate} envíos/s)`
+    `[worker] ${name} iniciado (proveedor ${cfg.mailProvider}, concurrencia ${cfg.workerConcurrency}, ${cfg.sesMaxSendRate} envíos/s${
+      cfg.awsRegionSecondary ? `, regiones ${cfg.awsRegion} y ${cfg.awsRegionSecondary}` : ''
+    })`
   );
 
   let stopping = false;

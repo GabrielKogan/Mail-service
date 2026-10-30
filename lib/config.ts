@@ -1,5 +1,7 @@
 import { randomBytes } from 'crypto';
 import { z } from 'zod';
+import { topicRegion } from '@/lib/aws/sns-verify';
+import { regionFromQueueUrl } from '@/lib/aws/queue-url';
 
 const MIN_SECRET_LENGTH = 32;
 
@@ -49,11 +51,12 @@ const envSchema = z.object({
   MAIL_PROVIDER: z
     .string()
     .optional()
-    .transform((v) => (v?.trim().toLowerCase() || 'ses'))
+    .transform((v) => (v?.trim().toLowerCase() || 'ses-api'))
     .pipe(z.enum(['ses', 'ses-api', 'brevo', 'smtp'])),
   MAIL_FROM_EMAIL: optionalString,
   MAIL_FROM_NAME: optionalString,
   AWS_REGION: optionalString,
+  AWS_REGION_SECONDARY: optionalString,
   APP_BASE_URL: optionalString,
   PORT: optionalString,
 
@@ -65,7 +68,9 @@ const envSchema = z.object({
   UNSUBSCRIBE_HMAC_SECRET_PREVIOUS: optionalString,
 
   SES_CONFIGURATION_SET: optionalString,
+  SES_ENDPOINT_ID: optionalString,
   SES_SNS_TOPIC_ARN: optionalString,
+  SES_SNS_TOPIC_ARN_SECONDARY: optionalString,
   SES_MAX_SEND_RATE: positiveInt(10),
   SES_WEBHOOK_ENABLED: booleanFlag(true),
 
@@ -75,8 +80,11 @@ const envSchema = z.object({
     .transform((v) => (v?.trim().toLowerCase() || 'sync'))
     .pipe(z.enum(['sync', 'queue'])),
   SQS_SEND_QUEUE_URL: optionalString,
+  SQS_SEND_QUEUE_URL_SECONDARY: optionalString,
   SQS_SEND_DLQ_URL: optionalString,
+  SQS_SEND_DLQ_URL_SECONDARY: optionalString,
   SQS_EVENTS_QUEUE_URL: optionalString,
+  SQS_EVENTS_QUEUE_URL_SECONDARY: optionalString,
   WORKER_CONCURRENCY: positiveInt(5),
   WORKER_NAME: optionalString,
 
@@ -97,6 +105,7 @@ export type AppConfig = {
   mailFromEmail?: string;
   mailFromName?: string;
   awsRegion?: string;
+  awsRegionSecondary?: string;
   appBaseUrl?: string;
   port?: string;
   internalApiToken?: string;
@@ -106,13 +115,21 @@ export type AppConfig = {
   unsubscribeSecret: string;
   unsubscribeSecretPrevious?: string;
   sesConfigurationSet?: string;
+  /** Id del global endpoint de SES. El envío por API se reparte entre las dos regiones. */
+  sesEndpointId?: string;
   sesSnsTopicArn?: string;
+  sesSnsTopicArnSecondary?: string;
+  /** Tópicos SNS aceptados (principal y, si existe, el de respaldo). */
+  sesSnsTopicArns: string[];
   sesMaxSendRate: number;
   sesWebhookEnabled: boolean;
   mailSendMode: 'sync' | 'queue';
   sqsSendQueueUrl?: string;
+  sqsSendQueueUrlSecondary?: string;
   sqsSendDlqUrl?: string;
+  sqsSendDlqUrlSecondary?: string;
   sqsEventsQueueUrl?: string;
+  sqsEventsQueueUrlSecondary?: string;
   workerConcurrency: number;
   workerName?: string;
   corsOrigins?: string;
@@ -170,13 +187,112 @@ function validateSecrets(env: z.infer<typeof envSchema>, issues: string[]): void
   }
 }
 
+function checkQueueRegion(
+  issues: string[],
+  name: string,
+  url: string | undefined,
+  region: string | undefined,
+  regionVar: string
+): void {
+  if (!url) return;
+  if (!region) {
+    issues.push(`${name} requiere ${regionVar}`);
+    return;
+  }
+  const actual = regionFromQueueUrl(url);
+  if (!actual) {
+    issues.push(`${name} no es una URL de SQS válida`);
+    return;
+  }
+  if (actual !== region) {
+    issues.push(`${name} está en ${actual}; tiene que estar en ${region}`);
+  }
+}
+
+function checkTopicRegion(
+  issues: string[],
+  name: string,
+  arn: string | undefined,
+  region: string | undefined,
+  regionVar: string
+): void {
+  if (!arn) return;
+  if (!region) {
+    issues.push(`${name} requiere ${regionVar}`);
+    return;
+  }
+  const actual = topicRegion(arn);
+  if (!actual) {
+    issues.push(`${name} no es un ARN de SNS válido`);
+    return;
+  }
+  if (actual !== region) {
+    issues.push(`${name} está en ${actual}; tiene que estar en ${region}`);
+  }
+}
+
 function validateQueue(env: z.infer<typeof envSchema>, issues: string[]): void {
+  const usesSqs = Boolean(
+    env.SQS_SEND_QUEUE_URL ||
+      env.SQS_SEND_QUEUE_URL_SECONDARY ||
+      env.SQS_EVENTS_QUEUE_URL ||
+      env.SQS_EVENTS_QUEUE_URL_SECONDARY
+  );
   if (env.MAIL_SEND_MODE === 'queue' && !env.SQS_SEND_QUEUE_URL) {
     issues.push('MAIL_SEND_MODE=queue requiere SQS_SEND_QUEUE_URL');
   }
-  if ((env.SQS_SEND_QUEUE_URL || env.SQS_EVENTS_QUEUE_URL || env.MAIL_PROVIDER === 'ses-api') && !env.AWS_REGION) {
+  if ((usesSqs || env.MAIL_PROVIDER === 'ses-api' || env.SES_ENDPOINT_ID) && !env.AWS_REGION) {
     issues.push('AWS_REGION es obligatorio para usar SQS o MAIL_PROVIDER=ses-api');
   }
+  if (env.AWS_REGION && env.AWS_REGION_SECONDARY && env.AWS_REGION === env.AWS_REGION_SECONDARY) {
+    issues.push('AWS_REGION_SECONDARY tiene que ser distinta de AWS_REGION');
+  }
+  if (env.SES_ENDPOINT_ID && env.MAIL_PROVIDER !== 'ses-api') {
+    issues.push('SES_ENDPOINT_ID requiere MAIL_PROVIDER=ses-api');
+  }
+  if (env.SQS_SEND_QUEUE_URL_SECONDARY && !env.SQS_SEND_QUEUE_URL) {
+    issues.push('SQS_SEND_QUEUE_URL_SECONDARY requiere SQS_SEND_QUEUE_URL');
+  }
+  if (env.SQS_SEND_DLQ_URL_SECONDARY && !env.SQS_SEND_QUEUE_URL_SECONDARY) {
+    issues.push('SQS_SEND_DLQ_URL_SECONDARY requiere SQS_SEND_QUEUE_URL_SECONDARY');
+  }
+  if (env.SQS_EVENTS_QUEUE_URL_SECONDARY && !env.SES_SNS_TOPIC_ARN_SECONDARY) {
+    issues.push('SQS_EVENTS_QUEUE_URL_SECONDARY requiere SES_SNS_TOPIC_ARN_SECONDARY');
+  }
+
+  checkQueueRegion(issues, 'SQS_SEND_QUEUE_URL', env.SQS_SEND_QUEUE_URL, env.AWS_REGION, 'AWS_REGION');
+  checkQueueRegion(issues, 'SQS_SEND_DLQ_URL', env.SQS_SEND_DLQ_URL, env.AWS_REGION, 'AWS_REGION');
+  checkQueueRegion(issues, 'SQS_EVENTS_QUEUE_URL', env.SQS_EVENTS_QUEUE_URL, env.AWS_REGION, 'AWS_REGION');
+  checkTopicRegion(issues, 'SES_SNS_TOPIC_ARN', env.SES_SNS_TOPIC_ARN, env.AWS_REGION, 'AWS_REGION');
+
+  checkQueueRegion(
+    issues,
+    'SQS_SEND_QUEUE_URL_SECONDARY',
+    env.SQS_SEND_QUEUE_URL_SECONDARY,
+    env.AWS_REGION_SECONDARY,
+    'AWS_REGION_SECONDARY'
+  );
+  checkQueueRegion(
+    issues,
+    'SQS_SEND_DLQ_URL_SECONDARY',
+    env.SQS_SEND_DLQ_URL_SECONDARY,
+    env.AWS_REGION_SECONDARY,
+    'AWS_REGION_SECONDARY'
+  );
+  checkQueueRegion(
+    issues,
+    'SQS_EVENTS_QUEUE_URL_SECONDARY',
+    env.SQS_EVENTS_QUEUE_URL_SECONDARY,
+    env.AWS_REGION_SECONDARY,
+    'AWS_REGION_SECONDARY'
+  );
+  checkTopicRegion(
+    issues,
+    'SES_SNS_TOPIC_ARN_SECONDARY',
+    env.SES_SNS_TOPIC_ARN_SECONDARY,
+    env.AWS_REGION_SECONDARY,
+    'AWS_REGION_SECONDARY'
+  );
 }
 
 let devUnsubscribeSecret: string | null = null;
@@ -218,6 +334,7 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): AppConfig 
     mailFromEmail: env.MAIL_FROM_EMAIL,
     mailFromName: env.MAIL_FROM_NAME,
     awsRegion: env.AWS_REGION,
+    awsRegionSecondary: env.AWS_REGION_SECONDARY,
     appBaseUrl: env.APP_BASE_URL?.replace(/\/$/, ''),
     port: env.PORT,
     internalApiToken: env.INTERNAL_API_TOKEN,
@@ -227,13 +344,21 @@ export function parseConfig(source: NodeJS.ProcessEnv = process.env): AppConfig 
     unsubscribeSecret,
     unsubscribeSecretPrevious: env.UNSUBSCRIBE_HMAC_SECRET_PREVIOUS,
     sesConfigurationSet: env.SES_CONFIGURATION_SET,
+    sesEndpointId: env.SES_ENDPOINT_ID,
     sesSnsTopicArn: env.SES_SNS_TOPIC_ARN,
+    sesSnsTopicArnSecondary: env.SES_SNS_TOPIC_ARN_SECONDARY,
+    sesSnsTopicArns: [env.SES_SNS_TOPIC_ARN, env.SES_SNS_TOPIC_ARN_SECONDARY].filter(
+      (topic): topic is string => Boolean(topic)
+    ),
     sesMaxSendRate: env.SES_MAX_SEND_RATE,
     sesWebhookEnabled: env.SES_WEBHOOK_ENABLED,
     mailSendMode: env.MAIL_SEND_MODE,
     sqsSendQueueUrl: env.SQS_SEND_QUEUE_URL,
+    sqsSendQueueUrlSecondary: env.SQS_SEND_QUEUE_URL_SECONDARY,
     sqsSendDlqUrl: env.SQS_SEND_DLQ_URL,
+    sqsSendDlqUrlSecondary: env.SQS_SEND_DLQ_URL_SECONDARY,
     sqsEventsQueueUrl: env.SQS_EVENTS_QUEUE_URL,
+    sqsEventsQueueUrlSecondary: env.SQS_EVENTS_QUEUE_URL_SECONDARY,
     workerConcurrency: env.WORKER_CONCURRENCY,
     workerName: env.WORKER_NAME,
     corsOrigins: env.CORS_ORIGINS,

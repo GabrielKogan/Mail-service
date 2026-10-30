@@ -26,8 +26,8 @@ export async function handleEventMessage(msg: ReceivedMessage): Promise<void> {
 
   if (envelope.Type !== 'Notification' || !envelope.Message) return;
 
-  const topic = config().sesSnsTopicArn;
-  if (topic && envelope.TopicArn && envelope.TopicArn !== topic) {
+  const topics = config().sesSnsTopicArns;
+  if (topics.length && envelope.TopicArn && !topics.includes(envelope.TopicArn)) {
     console.warn('[worker:events] TopicArn inesperado, se descarta', envelope.TopicArn);
     return;
   }

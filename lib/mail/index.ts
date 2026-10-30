@@ -9,7 +9,7 @@ export { MailProviderError, isRetryableError, mailErrorMessage } from './errors'
 export type { MailMessage, MailProvider, MailSendResult } from './types';
 
 export function getMailProvider(): MailProvider {
-  const name = (process.env.MAIL_PROVIDER ?? 'ses').toLowerCase().trim();
+  const name = (process.env.MAIL_PROVIDER ?? 'ses-api').toLowerCase().trim();
 
   switch (name) {
     case 'ses':

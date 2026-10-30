@@ -14,6 +14,7 @@ import {
   withUnsubscribeFooterText,
 } from './tracking';
 import { feedbackId } from './feedback-id';
+import { parseRemitente } from './from';
 
 export const MAX_INTENTOS = 5;
 
@@ -109,6 +110,7 @@ export async function processSendJob(
   try {
     await rateLimiter().take();
     const { messageId } = await getMailProvider().send({
+      from: parseRemitente(log.remitente),
       to: log.destinatario,
       toName: log.nombreDest ?? '',
       subject: log.asunto,

@@ -29,8 +29,12 @@ export function isRetryableSesError(err: unknown): boolean {
   return isNetworkError(err);
 }
 
+function identityOf(message: MailMessage) {
+  return message.from ?? getMailFrom();
+}
+
 export async function buildRawMessage(message: MailMessage): Promise<Buffer> {
-  const from = getMailFrom();
+  const from = identityOf(message);
   const composer = new MailComposer({
     from: { name: from.name, address: from.email },
     to: message.toName ? { name: message.toName, address: message.to } : message.to,
@@ -57,6 +61,7 @@ export class SesApiProvider implements MailProvider {
       throw new MailProviderError('Falta AWS_REGION para MAIL_PROVIDER=ses-api');
     }
 
+    const from = identityOf(message);
     const raw = await buildRawMessage(message);
     const tags = Object.entries(message.tags ?? {}).map(([Name, Value]) => ({
       Name,
@@ -66,10 +71,11 @@ export class SesApiProvider implements MailProvider {
     try {
       const res = await sesClient().send(
         new SendEmailCommand({
-          FromEmailAddress: getMailFrom().email,
+          FromEmailAddress: from.email,
           Destination: { ToAddresses: [message.to] },
           Content: { Raw: { Data: raw } },
           ConfigurationSetName: config().sesConfigurationSet,
+          EndpointId: config().sesEndpointId,
           EmailTags: tags.length ? tags : undefined,
         })
       );

@@ -5,7 +5,8 @@ import { processSesNotification } from '@/lib/mail/ses-events';
 
 /**
  * Webhook para notificaciones SNS de Amazon SES (configuration set).
- * Solo acepta mensajes firmados por SNS y del tópico `SES_SNS_TOPIC_ARN`.
+ * Solo acepta mensajes firmados por SNS y de un tópico configurado
+ * (`SES_SNS_TOPIC_ARN` o `SES_SNS_TOPIC_ARN_SECONDARY`).
  */
 export async function POST(req: NextRequest) {
   if (!config().sesWebhookEnabled) {
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Se espera un mensaje SNS' }, { status: 400 });
   }
 
-  const verified = await verifySnsMessage(envelope, config().sesSnsTopicArn);
+  const verified = await verifySnsMessage(envelope, config().sesSnsTopicArns);
   if (!verified.ok) {
     console.warn('[ses-webhook] mensaje rechazado:', verified.reason);
     return NextResponse.json({ error: 'Mensaje SNS no válido' }, { status: 403 });
