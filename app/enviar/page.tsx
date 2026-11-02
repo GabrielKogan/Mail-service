@@ -8,6 +8,7 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_TOTAL_BYTES,
 } from '@/lib/attachment-limits';
+import { buzonDeNombre } from '@/lib/mail/buzon-nombre';
 import { sanitizeHtml } from '@/lib/sanitize-html';
 
 type SendOk = {
@@ -19,6 +20,8 @@ type SendOk = {
   estado?: string;
   duplicado?: boolean;
   adjuntos?: string[];
+  remitente?: string;
+  nombre_remitente?: string;
 };
 type SendErr = {
   ok?: false;
@@ -60,6 +63,7 @@ type Sistema = {
   origen: string;
   clasificacion: 'transactional' | 'subscription';
   permiteRawHtml: boolean;
+  activo?: boolean;
 };
 
 type Preview = { asunto: string; html: string; texto: string };
@@ -87,12 +91,17 @@ function emptyData(campos: Campo[]): Record<string, string | string[]> {
   );
 }
 
-const MAILS_DE_ENVIO = [
-  { value: 'turnos', label: 'turnos@lujandecuyo.gob.ar' },
-  { value: 'rentas', label: 'rentas@lujandecuyo.gob.ar' },
-] as const;
+const DOMINIO = 'lujandecuyo.gob.ar';
+const BUZON_NO_RESPONDER = 'no-reply';
+const NOMBRE_NO_RESPONDER = 'No responder';
 
-/** Nombre visible a partir del buzón: `turnos` o `turnos@dominio` → `Turnos`. */
+function mailDeSistema(sistemas: Sistema[], origen: string): string {
+  const sistema = sistemas.find((s) => s.origen === origen);
+  const local = sistema ? buzonDeNombre(sistema.nombre) : '';
+  return local || BUZON_NO_RESPONDER;
+}
+
+/** Nombre visible a partir de un buzón escrito a mano. */
 function nombreDeBuzon(buzon: string): string {
   const local = buzon.split('@')[0]?.trim() ?? '';
   if (!local) return '';
@@ -101,12 +110,52 @@ function nombreDeBuzon(buzon: string): string {
 
 function remitenteElegido(
   opcion: string,
-  otro: string
+  otro: string,
+  sistemas: Sistema[]
 ): { desde?: string; nombre_remitente?: string } {
-  const buzon = (opcion === 'otro' ? otro : opcion).trim();
-  if (!buzon) return {};
-  const nombre = nombreDeBuzon(buzon);
-  return nombre ? { desde: buzon, nombre_remitente: nombre } : { desde: buzon };
+  if (opcion === 'otro') {
+    const buzon = otro.trim();
+    if (!buzon) return {};
+    const nombre = nombreDeBuzon(buzon);
+    return nombre ? { desde: buzon, nombre_remitente: nombre } : { desde: buzon };
+  }
+  if (!opcion || opcion === BUZON_NO_RESPONDER) {
+    return { desde: BUZON_NO_RESPONDER, nombre_remitente: NOMBRE_NO_RESPONDER };
+  }
+  const sistema = sistemas.find((s) => buzonDeNombre(s.nombre) === opcion);
+  return {
+    desde: opcion,
+    nombre_remitente: sistema?.nombre.trim() || nombreDeBuzon(opcion),
+  };
+}
+
+function direccionDe(buzon: string): string {
+  const limpio = buzon.trim().toLowerCase();
+  if (!limpio) return '';
+  return limpio.includes('@') ? limpio : `${limpio}@${DOMINIO}`;
+}
+
+/** Cómo va a figurar el From, para verlo en el formulario antes de enviar. */
+function textoRemitente(opcion: string, otro: string, sistemas: Sistema[]): string {
+  const elegido = remitenteElegido(opcion, otro, sistemas);
+  if (!elegido.desde || !elegido.nombre_remitente) {
+    return `Sale como ${NOMBRE_NO_RESPONDER} <${BUZON_NO_RESPONDER}@${DOMINIO}>.`;
+  }
+  return `Sale como ${elegido.nombre_remitente} <${direccionDe(elegido.desde)}>.`;
+}
+
+function opcionesDeEnvio(sistemas: Sistema[]): { value: string; label: string }[] {
+  const vistos = new Set<string>([BUZON_NO_RESPONDER, 'panel', 'otro']);
+  const opciones: { value: string; label: string }[] = [];
+  for (const s of sistemas) {
+    if (s.activo === false) continue;
+    const key = buzonDeNombre(s.nombre);
+    const titulo = s.nombre.trim();
+    if (!key || !titulo || vistos.has(key)) continue;
+    vistos.add(key);
+    opciones.push({ value: key, label: `${titulo} · ${key}@${DOMINIO}` });
+  }
+  return opciones;
 }
 
 export default function EnviarPage() {
@@ -118,7 +167,7 @@ export default function EnviarPage() {
   const [origen, setOrigen] = useState('');
   const [email, setEmail] = useState('');
   const [nombre, setNombre] = useState('');
-  const [mailEnvio, setMailEnvio] = useState('');
+  const [mailEnvio, setMailEnvio] = useState(BUZON_NO_RESPONDER);
   const [otroMail, setOtroMail] = useState('');
   const [asunto, setAsunto] = useState('');
   const [cuerpo, setCuerpo] = useState('<p></p>');
@@ -142,7 +191,7 @@ export default function EnviarPage() {
         }
         if (sRes.ok) {
           const json = (await sRes.json()) as { sistemas: Sistema[] };
-          setSistemas(json.sistemas.filter((s) => s.origen !== 'panel'));
+          setSistemas(json.sistemas.filter((s) => s.activo !== false && s.origen !== 'panel'));
         }
       } catch {
         // El formulario sigue usable: se puede escribir el origen a mano.
@@ -154,6 +203,8 @@ export default function EnviarPage() {
     () => plantillas.find((p) => p.tipo === tipo) ?? null,
     [plantillas, tipo]
   );
+  const mails = useMemo(() => opcionesDeEnvio(sistemas), [sistemas]);
+  const vistaRemitente = textoRemitente(mailEnvio, otroMail, sistemas);
 
   function onTipoChange(next: string) {
     setTipo(next);
@@ -161,7 +212,10 @@ export default function EnviarPage() {
     const p = plantillas.find((x) => x.tipo === next);
     if (p) {
       setData(emptyData(p.campos));
-      if (p.origenes?.length === 1) setOrigen(p.origenes[0]);
+      if (p.origenes?.length === 1) {
+        setOrigen(p.origenes[0]);
+        setMailEnvio(mailDeSistema(sistemas, p.origenes[0]));
+      }
     } else {
       setData({});
     }
@@ -187,7 +241,7 @@ export default function EnviarPage() {
           tipo,
           data,
           nombre,
-          ...remitenteElegido(mailEnvio, otroMail),
+          ...remitenteElegido(mailEnvio, otroMail, sistemas),
         }),
       });
       const json = (await res.json()) as Preview | SendErr;
@@ -230,7 +284,7 @@ export default function EnviarPage() {
         return;
       }
       const adjuntos = await Promise.all(files.map(fileToAdjunto));
-      const remitente = remitenteElegido(mailEnvio, otroMail);
+      const remitente = remitenteElegido(mailEnvio, otroMail, sistemas);
       const payload =
         modo === 'plantilla'
           ? { email, nombre, tipo, data, origen: origen || undefined, ...remitente, adjuntos }
@@ -279,19 +333,28 @@ export default function EnviarPage() {
           DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos,{' '}
           {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB cada uno y{' '}
           {MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB en total. Si no elegís sistema,
-          el origen queda como <code>panel</code>. El nombre del mail de envío elige la
-          dirección que ve el destinatario, por ejemplo <code>turnos@</code> o <code>rentas@</code>.
+          el origen queda como <code>panel</code>. El mail de envío sale del nombre del
+          sistema: «Licencia de conducir» usa <code>licenciadeconducir@{DOMINIO}</code>. Por
+          defecto es <code>no-reply@{DOMINIO}</code> (No responder).
         </p>
       </header>
 
       <form className="form card" onSubmit={onSubmit}>
         <label>
           Sistema (origen)
-          <select value={origen} onChange={(e) => setOrigen(e.target.value)}>
+          <select
+            value={origen}
+            onChange={(e) => {
+              const next = e.target.value;
+              setOrigen(next);
+              setMailEnvio(next ? mailDeSistema(sistemas, next) : BUZON_NO_RESPONDER);
+              setPreview(null);
+            }}
+          >
             <option value="">panel (sin sistema)</option>
             {sistemas.map((s) => (
               <option key={s.id} value={s.origen}>
-                {s.nombre} ({s.origen}) · {s.clasificacion}
+                {s.nombre} ({s.origen}) · {buzonDeNombre(s.nombre) || BUZON_NO_RESPONDER}@{DOMINIO}
                 {s.permiteRawHtml ? ' · HTML libre' : ''}
               </option>
             ))}
@@ -307,17 +370,19 @@ export default function EnviarPage() {
               setPreview(null);
             }}
           >
-            <option value="">El configurado en el servicio</option>
-            {MAILS_DE_ENVIO.map((m) => (
+            <option value={BUZON_NO_RESPONDER}>
+              {NOMBRE_NO_RESPONDER} · {BUZON_NO_RESPONDER}@{DOMINIO}
+            </option>
+            {mails.map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>
             ))}
             <option value="otro">Otro buzón del municipio</option>
           </select>
-          <span className="muted">
-            Cambia la dirección de salida. Vacío usa el remitente configurado.
-          </span>
+          <p className="muted" style={{ margin: '8px 0 0' }}>
+            {vistaRemitente}
+          </p>
         </label>
         {mailEnvio === 'otro' ? (
           <label>
@@ -500,6 +565,9 @@ export default function EnviarPage() {
                 {ok.adjuntos?.length ? ` · adjuntos: ${ok.adjuntos.join(', ')}` : ''}.
               </>
             )}{' '}
+            {ok.remitente
+              ? ` Remitente: ${ok.nombre_remitente ? `${ok.nombre_remitente} <${ok.remitente}>` : ok.remitente}.`
+              : ' '}
             Revisá spam si no aparece.
           </div>
         ) : null}
