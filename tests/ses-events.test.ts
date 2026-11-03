@@ -147,6 +147,44 @@ describe('processSesNotification', () => {
     expect(db.state.current.eventos).toHaveLength(1);
   });
 
+  it('un Open de un filtro no pasa el mail a abierto', async () => {
+    const open = JSON.stringify({
+      eventType: 'Open',
+      mail: {
+        messageId: 'ses-1',
+        timestamp: '2026-11-03T15:00:00.000Z',
+        tags: { mail_log_id: ['1'] },
+      },
+      open: {
+        timestamp: '2026-11-03T15:00:02.000Z',
+        userAgent: 'Mozilla/5.0 Chrome/120.0.0.0',
+        ipAddress: '203.0.113.8',
+      },
+    });
+    expect(await processSesNotification('sns-open-filtro', open)).toBe('processed');
+    expect(db.state.current.eventos.map((e) => e.evento)).toEqual(['apertura_filtro']);
+    expect(db.state.current.logs[0].estadoActual).toBe('entregado');
+  });
+
+  it('un Open de Gmail sí marca abierto', async () => {
+    const open = JSON.stringify({
+      eventType: 'Open',
+      mail: {
+        messageId: 'ses-1',
+        timestamp: '2026-11-03T15:00:00.000Z',
+        tags: { mail_log_id: ['1'] },
+      },
+      open: {
+        timestamp: '2026-11-03T15:00:02.000Z',
+        userAgent: 'Mozilla/5.0 (via ggpht.com GoogleImageProxy)',
+        ipAddress: '66.249.88.10',
+      },
+    });
+    expect(await processSesNotification('sns-open-gmail', open)).toBe('processed');
+    expect(db.state.current.eventos.map((e) => e.evento)).toEqual(['apertura']);
+    expect(db.state.current.logs[0].estadoActual).toBe('abierto');
+  });
+
   it('un evento sin MailLog se informa como unmatched', async () => {
     const other = JSON.stringify({ eventType: 'Delivery', mail: { messageId: 'otro' } });
     expect(await processSesNotification('sns-3', other)).toBe('unmatched');

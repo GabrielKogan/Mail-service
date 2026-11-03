@@ -23,6 +23,8 @@ export type MailMessage = {
 
 export type MailSendResult = {
   messageId: string;
+  /** Presente cuando el mensaje lo aceptó el respaldo, no SES. */
+  proveedor?: 'brevo';
 };
 
 export interface MailProvider {

@@ -6,13 +6,21 @@ import { MailProviderError, isNetworkError } from '../errors';
 import { getMailFrom } from '../from';
 import type { MailMessage, MailProvider, MailSendResult } from '../types';
 
-const RETRYABLE_NAMES = new Set([
+const THROTTLE_NAMES = new Set([
   'TooManyRequestsException',
   'ThrottlingException',
   'LimitExceededException',
+]);
+
+const OUTAGE_NAMES = new Set([
   'InternalFailure',
+  'InternalServerException',
   'ServiceUnavailable',
+  'ServiceUnavailableException',
   'TimeoutError',
+  'RequestTimeout',
+  'RequestTimeoutException',
+  'NetworkingError',
 ]);
 
 /** Los valores de las etiquetas de SES solo admiten letras, números, `_` y `-`. */
@@ -22,10 +30,28 @@ function tagValue(value: string): string {
 
 export function isRetryableSesError(err: unknown): boolean {
   const e = err as { name?: string; $retryable?: unknown; $metadata?: { httpStatusCode?: number } };
-  if (e?.name && RETRYABLE_NAMES.has(e.name)) return true;
+  if (e?.name && (THROTTLE_NAMES.has(e.name) || OUTAGE_NAMES.has(e.name))) return true;
   if (e?.$retryable) return true;
   const status = e?.$metadata?.httpStatusCode;
   if (typeof status === 'number') return status >= 500 || status === 429;
+  return isNetworkError(err);
+}
+
+/**
+ * Caída de SES (red, timeout o 5xx). El global endpoint ya intentó las dos
+ * regiones. Un límite de tasa se queda en SES: lo reintenta la cola.
+ */
+export function isSesAvailabilityError(err: unknown): boolean {
+  if (err instanceof MailProviderError) {
+    if (!err.retryable) return false;
+    return err.cause !== undefined && isSesAvailabilityError(err.cause);
+  }
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+  if (e?.name && THROTTLE_NAMES.has(e.name)) return false;
+  const status = e?.$metadata?.httpStatusCode;
+  if (status === 429) return false;
+  if (e?.name && OUTAGE_NAMES.has(e.name)) return true;
+  if (typeof status === 'number' && status >= 500) return true;
   return isNetworkError(err);
 }
 

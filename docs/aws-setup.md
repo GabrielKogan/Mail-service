@@ -15,7 +15,7 @@ IAM y las alarmas. Abajo están los pasos, lo que la plantilla no cubre y cómo 
 | Suscripción SNS → `mail-events` | protocolo `sqs`, **raw delivery desactivado** (el worker necesita el sobre SNS con `MessageId`) |
 | Política de `mail-events` | `sqs:SendMessage` solo desde el tópico de SES (`aws:SourceArn`) |
 | Usuario `mail-api` | `sqs:SendMessage` sobre `mail-send`; `ses:GetAccount`, `ses:GetSuppressedDestination`, `ses:DeleteSuppressedDestination`, `ses:GetEmailIdentity` y `ses:GetConfigurationSet` (reactivaciones y estado de SES) |
-| Usuario `mail-worker` | leer/borrar en las cuatro colas, `SendMessage` en `mail-send`, `ses:SendEmail`/`ses:SendRawEmail` solo desde `MAIL_FROM_EMAIL` |
+| Usuario `mail-worker` | leer/borrar en las cuatro colas, `SendMessage` en `mail-send`, `ses:SendEmail`/`ses:SendRawEmail` desde cualquier buzón del dominio de `MAIL_FROM_EMAIL` |
 | Alarmas | cualquier cola de fallidos con mensajes; mensaje más viejo de `mail-send` > 10 min |
 
 Todas las colas usan cifrado SSE-SQS (administrado por SQS). No usar una clave KMS propia:
@@ -234,6 +234,7 @@ Con las variables de respaldo cargadas no hay que cambiar de región a mano:
 - Si `mail-send` de Fráncfort no responde en 8 segundos, el servicio encola en `mail-send` de Irlanda. El worker lee las dos colas.
 - El worker lee las dos colas de eventos y acepta los dos tópicos SNS. El webhook también.
 - Los mensajes que ya estaban en una cola caída se procesan cuando esa región vuelve. La otra cola no los ve.
+- Si las dos regiones fallan al aceptar el envío (red, timeout o 5xx) y `BREVO_API_KEY` está definida, ese mensaje sale por Brevo. Un límite de tasa de SES no cambia de proveedor.
 
 El envío ya es `ses-api`. Con `SES_ENDPOINT_ID`, SES reparte entre las dos regiones. El modo `ses` (SMTP) no usa ese punto de conexión.
 

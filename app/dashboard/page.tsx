@@ -58,6 +58,7 @@ const EVENTO_LABELS: Record<string, string> = {
   envio_ses: 'SES lo envió',
   entrega: 'Entregado',
   apertura: 'Abierto',
+  apertura_filtro: 'Filtro del buzón (no es una apertura)',
   click: 'Click en un enlace',
   rebote: 'Rebote',
   queja: 'Queja de spam',
@@ -793,14 +794,31 @@ export default function DashboardPage() {
                   <>
                     <p style={{ fontWeight: 600, marginBottom: 6 }}>Eventos</p>
                     <ul className="event-list">
-                      {detail.eventos.map((ev) => (
-                        <li key={ev.id} className={ev.interno ? 'muted' : undefined}>
-                          {ev.interno ? eventoLabel(ev.evento) : <strong>{eventoLabel(ev.evento)}</strong>}{' '}
-                          — {formatFecha(ev.fechaEvento)}
-                          {ev.ip ? ` · IP ${ev.ip}` : ''}
-                          {ev.detalle ? ` · ${ev.detalle}` : ''}
-                        </li>
-                      ))}
+                      {detail.eventos.map((ev) => {
+                        const filtro = ev.evento === 'apertura_filtro';
+                        const discreto = ev.interno || filtro;
+                        const agente =
+                          ev.evento === 'apertura' || filtro
+                            ? ev.userAgent
+                              ? ev.userAgent.length > 80
+                                ? `${ev.userAgent.slice(0, 80)}…`
+                                : ev.userAgent
+                              : null
+                            : null;
+                        return (
+                          <li key={ev.id} className={discreto ? 'muted' : undefined}>
+                            {discreto ? (
+                              eventoLabel(ev.evento)
+                            ) : (
+                              <strong>{eventoLabel(ev.evento)}</strong>
+                            )}{' '}
+                            — {formatFecha(ev.fechaEvento)}
+                            {ev.ip ? ` · IP ${ev.ip}` : ''}
+                            {agente ? ` · ${agente}` : ''}
+                            {ev.detalle ? ` · ${ev.detalle}` : ''}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </>
                 ) : null}

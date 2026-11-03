@@ -1,7 +1,8 @@
 import { MailProviderError } from './errors';
-import { BrevoProvider } from './providers/brevo';
+import { BrevoProvider, brevoApiKey } from './providers/brevo';
 import { SesSmtpProvider } from './providers/ses';
 import { SesApiProvider } from './providers/ses-api';
+import { SesWithBrevoFallback } from './providers/ses-brevo';
 import { SmtpProvider } from './providers/smtp';
 import type { MailProvider } from './types';
 
@@ -14,8 +15,11 @@ export function getMailProvider(): MailProvider {
   switch (name) {
     case 'ses':
       return new SesSmtpProvider();
-    case 'ses-api':
-      return new SesApiProvider();
+    case 'ses-api': {
+      const ses = new SesApiProvider();
+      if (!brevoApiKey()) return ses;
+      return new SesWithBrevoFallback(ses, new BrevoProvider());
+    }
     case 'brevo':
       return new BrevoProvider();
     case 'smtp':

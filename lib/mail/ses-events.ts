@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
-import { recordSesEvent } from '@/lib/mail/events';
+import { recordMailEvent, recordSesEvent } from '@/lib/mail/events';
+import { isLikelyPrefetch } from '@/lib/mail/open-signal';
 import {
   GLOBAL_SUPPRESSION_ORIGEN,
   upsertSuppression,
@@ -158,18 +159,42 @@ export async function processSesNotification(
         }
       }
 
-      await recordSesEvent(
-        {
-          mailLogId,
-          eventType: type,
-          timestamp: eventTimestamp(payload, type),
-          ip: open?.ipAddress || click?.ipAddress || null,
-          userAgent: open?.userAgent || click?.userAgent || null,
-          payloadRaw: rawMessage,
-          origenEventoId: snsMessageId ?? null,
-        },
-        tx
-      );
+      const openedAt = open?.timestamp ? new Date(open.timestamp) : new Date();
+      const sentAt = payload.mail?.timestamp ? new Date(payload.mail.timestamp) : null;
+      if (
+        type === 'Open' &&
+        isLikelyPrefetch({
+          userAgent: open?.userAgent,
+          openedAt,
+          sentAt,
+        })
+      ) {
+        await recordMailEvent(
+          {
+            mailLogId,
+            evento: 'apertura_filtro',
+            fechaEvento: openedAt,
+            ip: open?.ipAddress || null,
+            userAgent: open?.userAgent || null,
+            payloadRaw: rawMessage,
+            origenEventoId: snsMessageId ?? null,
+          },
+          tx
+        );
+      } else {
+        await recordSesEvent(
+          {
+            mailLogId,
+            eventType: type,
+            timestamp: eventTimestamp(payload, type),
+            ip: open?.ipAddress || click?.ipAddress || null,
+            userAgent: open?.userAgent || click?.userAgent || null,
+            payloadRaw: rawMessage,
+            origenEventoId: snsMessageId ?? null,
+          },
+          tx
+        );
+      }
     });
   } catch (err) {
     if (isUniqueViolation(err)) return 'duplicate';

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { recordMailEvent } from '@/lib/mail/events';
+import { isLikelyPrefetch } from '@/lib/mail/open-signal';
 import { verifyOpenToken } from '@/lib/mail/tracking';
 
 /** GIF 1x1 transparente. */
@@ -19,33 +20,58 @@ export async function GET(
   if (Number.isInteger(id) && id > 0 && verifyOpenToken(id, token)) {
     const log = await prisma.mailLog.findUnique({
       where: { id },
-      select: { id: true, estadoActual: true },
+      select: { id: true, estadoActual: true, fechaEnvio: true, fechaIntento: true },
     });
 
     if (log) {
-      const alreadyOpen = await prisma.mail_log_eventos.findFirst({
-        where: { mail_log_id: id, evento: 'apertura' },
-        select: { id: true },
+      const ip =
+        req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+        req.headers.get('x-real-ip') ||
+        null;
+      const userAgent = req.headers.get('user-agent');
+      const entrega = await prisma.mail_log_eventos.findFirst({
+        where: { mail_log_id: id, evento: 'entrega' },
+        orderBy: { fecha_evento: 'desc' },
+        select: { fecha_evento: true },
+      });
+      const filtro = isLikelyPrefetch({
+        userAgent,
+        openedAt: new Date(),
+        sentAt: log.fechaIntento ?? log.fechaEnvio,
+        deliveredAt: entrega?.fecha_evento ?? null,
       });
 
-      if (!alreadyOpen) {
-        const ip =
-          req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-          req.headers.get('x-real-ip') ||
-          null;
-        const userAgent = req.headers.get('user-agent');
-
-        try {
-          await recordMailEvent({
-            mailLogId: id,
-            evento: 'apertura',
-            ip,
-            userAgent,
-            nuevoEstado: 'abierto',
+      try {
+        if (filtro) {
+          const alreadyFiltered = await prisma.mail_log_eventos.findFirst({
+            where: { mail_log_id: id, evento: 'apertura_filtro' },
+            select: { id: true },
           });
-        } catch {
-          // No fallar el píxel si el log de evento falla.
+          if (!alreadyFiltered) {
+            await recordMailEvent({
+              mailLogId: id,
+              evento: 'apertura_filtro',
+              ip,
+              userAgent,
+            });
+          }
+        } else {
+          const alreadyOpen = await prisma.mail_log_eventos.findFirst({
+            where: { mail_log_id: id, evento: 'apertura' },
+            select: { id: true },
+          });
+          if (!alreadyOpen) {
+            await recordMailEvent({
+              mailLogId: id,
+              evento: 'apertura',
+              ip,
+              userAgent,
+              nuevoEstado: 'abierto',
+            });
+          }
         }
+      } catch {
+        // No fallar el píxel si el log de evento falla.
       }
     }
   }

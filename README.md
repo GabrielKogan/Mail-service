@@ -52,8 +52,8 @@ base vacía auxiliar (p. ej. `MAIL_QUEUE_SHADOW`). En producción solo se usa `p
 | Valor | Qué usa |
 | --- | --- |
 | `ses` | SES por SMTP (credenciales SMTP de SES). Configuration set y etiquetas van como headers `X-SES-*`. |
-| `ses-api` | SES por API v2 (`SendEmail` Raw) con las credenciales IAM. Recomendado con el worker: distingue errores reintentables. Con `SES_ENDPOINT_ID`, SES reparte el envío entre `AWS_REGION` y `AWS_REGION_SECONDARY`. |
-| `brevo` | API de Brevo (`BREVO_API_KEY`). |
+| `ses-api` | SES por API v2 (`SendEmail` Raw) con las credenciales IAM. Recomendado con el worker: distingue errores reintentables. Con `SES_ENDPOINT_ID`, SES reparte el envío entre `AWS_REGION` y `AWS_REGION_SECONDARY`. Si `BREVO_API_KEY` está definida y esa llamada cae por disponibilidad, el mismo mensaje sale por Brevo. |
+| `brevo` | API de Brevo (`BREVO_API_KEY`) como motor único, sin pasar por SES. |
 | `smtp` | Otro relay SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`). |
 
 El envío usa la API de SES (`ses-api`) con las claves IAM de `mail-api` y `mail-worker`, en la
@@ -64,6 +64,12 @@ sandbox, solo se entrega a direcciones verificadas.
 
 `SES_MAX_SEND_RATE` limita los envíos por segundo de cada proceso (token bucket). Dejarlo un
 poco por debajo del límite de la cuenta.
+
+Con `MAIL_PROVIDER=ses-api` y `BREVO_API_KEY`, Brevo queda detrás de las dos regiones de SES.
+El global endpoint ya elige región; si la llamada falla por red, timeout o 5xx, el proveedor
+compuesto (`SesWithBrevoFallback`) manda ese mensaje por la API de Brevo y el evento `aceptado`
+queda con `proveedor: "brevo"`. Un 429 o un rechazo definitivo siguen en SES. Los envíos que
+acepta Brevo no generan Delivery, Bounce ni Complaint en SES.
 
 ## Sistemas y claves de API
 

@@ -109,7 +109,7 @@ export async function processSendJob(
 
   try {
     await rateLimiter().take();
-    const { messageId } = await getMailProvider().send({
+    const sent = await getMailProvider().send({
       from: parseRemitente(log.remitente),
       to: log.destinatario,
       toName: log.nombreDest ?? '',
@@ -125,7 +125,7 @@ export async function processSendJob(
       })),
     });
 
-    const finalId = normalizeMessageId(messageId);
+    const finalId = normalizeMessageId(sent.messageId);
     await prisma.mailLog.update({
       where: { id: log.id },
       data: { messageId: finalId, cuerpo: html, texto: text ?? null, errorDetalle: null },
@@ -135,7 +135,10 @@ export async function processSendJob(
       where: { id: log.id, estadoActual: 'enviando' },
       data: { estadoActual: 'enviado' },
     });
-    await recordInternalEvent(log.id, 'aceptado', { messageId: finalId });
+    await recordInternalEvent(log.id, 'aceptado', {
+      messageId: finalId,
+      ...(sent.proveedor ? { proveedor: sent.proveedor } : {}),
+    });
     return { status: 'sent', messageId: finalId };
   } catch (err) {
     const detalle = mailErrorMessage(err);

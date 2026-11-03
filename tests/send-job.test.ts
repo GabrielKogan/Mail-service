@@ -24,7 +24,9 @@ const h = vi.hoisted(() => {
     eventos: [] as { evento: string; detalle: Record<string, unknown> | null }[],
   };
   const send = {
-    fn: async (_msg?: unknown): Promise<{ messageId: string }> => ({ messageId: 'ses-1' }),
+    fn: async (_msg?: unknown): Promise<{ messageId: string; proveedor?: 'brevo' }> => ({
+      messageId: 'ses-1',
+    }),
     calls: 0,
     last: null as unknown,
   };
@@ -158,6 +160,16 @@ describe('processSendJob', () => {
     const msg = h.send.last as { headers?: Record<string, string>; text?: string };
     expect(msg.headers?.['Feedback-ID']).toBe('novedad:turnos:subscription:mlc');
     expect(typeof msg.text).toBe('string');
+  });
+
+  it('registra el proveedor cuando el respaldo acepta el envío', async () => {
+    seed();
+    h.send.fn = async () => ({ messageId: 'brv-1', proveedor: 'brevo' });
+    await processSendJob(1);
+    expect(h.state.eventos).toEqual([
+      { evento: 'enviando', detalle: { intento: 1 } },
+      { evento: 'aceptado', detalle: { messageId: 'brv-1', proveedor: 'brevo' } },
+    ]);
   });
 
   it('un envío exitoso registra enviando y aceptado', async () => {

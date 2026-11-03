@@ -14,7 +14,7 @@ Parameters:
     Description: Nombre del configuration set de SES (SES_CONFIGURATION_SET).
   MailFromEmail:
     Type: String
-    Description: Remitente autorizado (MAIL_FROM_EMAIL). El worker solo puede enviar desde esta direccion.
+    Description: Remitente por defecto (MAIL_FROM_EMAIL). El worker puede enviar desde cualquier buzon de ese dominio.
   AlarmEmail:
     Type: String
     Default: ''
@@ -174,8 +174,8 @@ Resources:
                   - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
                   - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SesConfigurationSetName}'
                 Condition:
-                  StringEquals:
-                    ses:FromAddress: !Ref MailFromEmail
+                  StringLike:
+                    ses:FromAddress: !Join ['', ['*@', !Select [1, !Split ['@', !Ref MailFromEmail]]]]
 
   # ---------- Alarmas ----------
   AlarmTopic:
@@ -298,8 +298,8 @@ Resources:
               - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
               - !Sub 'arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SesConfigurationSetName}'
             Condition:
-              StringEquals:
-                ses:FromAddress: !Ref MailFromEmail
+              StringLike:
+                ses:FromAddress: !Join ['', ['*@', !Select [1, !Split ['@', !Ref MailFromEmail]]]]
 
 Outputs:
   SqsSendQueueUrl:

@@ -2,6 +2,11 @@ import { MailProviderError } from '../errors';
 import { getMailFrom } from '../from';
 import type { MailMessage, MailProvider, MailSendResult } from '../types';
 
+export function brevoApiKey(): string | undefined {
+  const key = process.env.BREVO_API_KEY?.trim();
+  return key || undefined;
+}
+
 function brevoErrorMessageBody(body: any): string {
   if (!body) return 'Error desconocido al enviar con Brevo';
   return body.message ?? JSON.stringify(body);
@@ -9,7 +14,7 @@ function brevoErrorMessageBody(body: any): string {
 
 export class BrevoProvider implements MailProvider {
   async send(message: MailMessage): Promise<MailSendResult> {
-    const apiKey = process.env.BREVO_API_KEY;
+    const apiKey = brevoApiKey();
     if (!apiKey) {
       throw new MailProviderError('Falta BREVO_API_KEY');
     }
