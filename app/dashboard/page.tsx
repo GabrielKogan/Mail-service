@@ -7,6 +7,7 @@ import {
   type StatsData,
 } from '@/components/DashboardStats';
 import { PostmasterCard } from '@/components/PostmasterCard';
+import { htmlATexto } from '@/lib/mail/html-a-texto';
 import { rangoSerieInicial } from '@/lib/mail/serie-range';
 
 type Tab = 'stats' | 'registro';
@@ -138,12 +139,69 @@ function estadoLabel(estado: string): string {
       return 'Enviando';
     case 'revisar':
       return 'Revisar (no se sabe si salió)';
+    case 'rechazado':
+      return 'Rechazado';
     default:
       return estado;
   }
 }
 
 type FiltroRapido = '' | 'llego' | 'abrio' | 'enviado';
+
+const LEYENDA: { estado?: string; etiqueta?: string; texto: string }[] = [
+  {
+    estado: 'en_cola',
+    texto: 'Está esperando que el worker lo envíe. Recién se registró, o un intento falló y va a reintentarse. Si el worker está caído, se queda acá.',
+  },
+  {
+    estado: 'enviando',
+    texto: 'El worker se lo está pasando al proveedor. Dura unos segundos. Si se queda en este estado, pasa a Revisar.',
+  },
+  {
+    estado: 'enviado',
+    texto: 'El proveedor aceptó el mail. Todavía no significa que haya llegado a la bandeja: falta el aviso de entrega, o el tracking de AWS no está configurado.',
+  },
+  {
+    estado: 'entregado',
+    texto: 'El servidor del destinatario lo aceptó. Puede caer igual en spam o promociones. No significa que la persona lo haya leído.',
+  },
+  {
+    estado: 'abierto',
+    texto: 'Se cargó la imagen de seguimiento. Casi siempre es que la persona lo abrió. Un filtro del buzón que precarga imágenes no cuenta como apertura: en los eventos figura como filtro.',
+  },
+  {
+    estado: 'rebotado',
+    texto: 'El destino lo rechazó. Pasa cuando la dirección está mal escrita, el buzón o el dominio no existen, o el buzón está lleno. Un rebote definitivo puede dejar la dirección suprimida.',
+  },
+  {
+    estado: 'queja',
+    texto: 'El destinatario lo marcó como spam. La dirección queda suprimida para no volver a enviarle.',
+  },
+  {
+    estado: 'suprimido',
+    texto: 'No se envió. La dirección ya estaba bloqueada por un rebote anterior, una queja de spam o una baja.',
+  },
+  {
+    estado: 'error',
+    texto: 'El proveedor lo rechazó o se agotaron los reintentos. El motivo concreto está en el detalle del envío: un adjunto que supera el límite, un fallo del proveedor o un dato inválido.',
+  },
+  {
+    estado: 'revisar',
+    texto: 'Quedó a mitad del envío y no se sabe si salió. Pasa si el proceso se corta mientras figuraba Enviando. Conviene mirar el detalle antes de reenviar, para no duplicarlo.',
+  },
+  {
+    estado: 'rechazado',
+    texto: 'SES lo rechazó y no intentó entregarlo. Suele ser una dirección inválida o un problema de la cuenta de envío.',
+  },
+  {
+    etiqueta: '¿Llegó? · Sin dato',
+    texto: 'Todavía no llegó el aviso de entrega, o falta el Configuration Set de SES. No es un rebote: simplemente no hay dato.',
+  },
+  {
+    etiqueta: '¿Abrió? · Sin dato',
+    texto: 'No se cargó la imagen de seguimiento. La persona puede haberlo leído igual si su correo bloquea imágenes, o la URL de seguimiento no es pública.',
+  },
+];
 
 function siNo(value: boolean | undefined, unknownLabel = 'Sin dato'): string {
   if (value === true) return 'Sí';
@@ -164,9 +222,11 @@ export default function DashboardPage() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loadingList, setLoadingList] = useState(false);
+  const [refreshingList, setRefreshingList] = useState(false);
   const [loadingStats, setLoadingStats] = useState(true);
   const [error, setError] = useState('');
   const [detail, setDetail] = useState<MailDetail | null>(null);
+  const [cuerpoVista, setCuerpoVista] = useState<'mensaje' | 'codigo'>('mensaje');
   const [detailLoading, setDetailLoading] = useState(false);
   const [markingOpen, setMarkingOpen] = useState(false);
   const [markingDeliver, setMarkingDeliver] = useState(false);
@@ -178,6 +238,7 @@ export default function DashboardPage() {
   const [desdeDia, setDesdeDia] = useState(() => rangoSerieInicial().desde);
   const [hastaDia, setHastaDia] = useState(() => rangoSerieInicial().hasta);
   const [requeueing, setRequeueing] = useState(false);
+  const [leyendaAbierta, setLeyendaAbierta] = useState(false);
   const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null);
   const appliedRef = useRef({
     estado: '',
@@ -240,8 +301,9 @@ export default function DashboardPage() {
   );
 
   const loadList = useCallback(
-    async (nextPage: number) => {
-      setLoadingList(true);
+    async (nextPage: number, opts?: { conservar?: boolean }) => {
+      if (opts?.conservar) setRefreshingList(true);
+      else setLoadingList(true);
       setError('');
       try {
         const params = filterParams();
@@ -249,7 +311,7 @@ export default function DashboardPage() {
         const res = await apiFetch(`/api/dashboard?${params.toString()}`);
         if (!res.ok) {
           setError('No se pudieron cargar los registros.');
-          setData(null);
+          if (!opts?.conservar) setData(null);
           return;
         }
         const json = (await res.json()) as ListResponse;
@@ -261,9 +323,10 @@ export default function DashboardPage() {
         });
       } catch {
         setError('Error de red al cargar el dashboard.');
-        setData(null);
+        if (!opts?.conservar) setData(null);
       } finally {
         setLoadingList(false);
+        setRefreshingList(false);
       }
     },
     [filterParams]
@@ -272,6 +335,15 @@ export default function DashboardPage() {
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
+
+  useEffect(() => {
+    if (!leyendaAbierta) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setLeyendaAbierta(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [leyendaAbierta]);
 
   useEffect(() => {
     apiFetch('/api/dashboard/worker')
@@ -308,6 +380,7 @@ export default function DashboardPage() {
   }
 
   async function openDetail(id: number) {
+    setCuerpoVista('mensaje');
     setDetailLoading(true);
     try {
       const res = await apiFetch(`/api/dashboard/${id}`);
@@ -429,11 +502,22 @@ export default function DashboardPage() {
   return (
     <main className="page">
       <header className="page-header">
-        <h1>Dashboard de mails</h1>
-        <p className="muted">
-          Estadísticas y registro de envíos. Filtrá por estado, origen o fechas y
-          cambiá de pestaña.
-        </p>
+        <div className="section-head">
+          <div>
+            <h1>Dashboard de mails</h1>
+            <p className="muted">
+              Estadísticas y registro de envíos. Filtrá por estado, origen o fechas y
+              cambiá de pestaña.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => setLeyendaAbierta(true)}
+          >
+            Leyenda
+          </button>
+        </div>
       </header>
 
       <div className="tabs" role="tablist" aria-label="Vistas del dashboard">
@@ -539,6 +623,51 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
+      {leyendaAbierta ? (
+        <div
+          className="modal-backdrop"
+          onClick={() => setLeyendaAbierta(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-labelledby="leyenda-titulo"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="leyenda-titulo" style={{ marginTop: 0 }}>
+              Leyenda de estados
+            </h2>
+            <p className="muted">
+              Qué significa cada estado y las causas más habituales.
+            </p>
+            <ul className="leyenda">
+              {LEYENDA.map((item) => (
+                <li key={item.estado ?? item.etiqueta}>
+                  {item.estado ? (
+                    <span className={`badge ${badgeClass(item.estado)}`}>
+                      {estadoLabel(item.estado)}
+                    </span>
+                  ) : (
+                    <strong>{item.etiqueta}</strong>
+                  )}
+                  <span>{item.texto}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="actions">
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => setLeyendaAbierta(false)}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {tab === 'stats' ? (
         <>
         <DashboardStats
@@ -623,9 +752,17 @@ export default function DashboardPage() {
             >
               Solo enviados (sin tracking)
             </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={loadingList || refreshingList}
+              onClick={() => void loadList(page, { conservar: data !== null })}
+            >
+              {refreshingList ? 'Actualizando…' : 'Actualizar'}
+            </button>
           </div>
 
-          {loadingList ? <p className="muted">Cargando…</p> : null}
+          {loadingList && !data ? <p className="muted">Cargando…</p> : null}
 
           {!loadingList && data && data.items.length === 0 ? (
             <div className="card">
@@ -637,7 +774,7 @@ export default function DashboardPage() {
             </div>
           ) : null}
 
-          {!loadingList && data && data.items.length > 0 ? (
+          {data && data.items.length > 0 ? (
             <>
               <div className="table-wrap">
                 <table>
@@ -829,8 +966,34 @@ export default function DashboardPage() {
                     app (URL pública) o SES Delivery no está configurado.
                   </p>
                 ) : null}
-                <p style={{ fontWeight: 600, marginBottom: 6 }}>Cuerpo</p>
-                <div className="html-body">{detail.cuerpo || '—'}</div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    marginBottom: 6,
+                  }}
+                >
+                  <p style={{ fontWeight: 600, margin: 0 }}>Cuerpo</p>
+                  <button
+                    className="btn secondary"
+                    type="button"
+                    style={{ margin: 0, padding: '0.35rem 0.85rem', fontSize: '0.82rem' }}
+                    onClick={() =>
+                      setCuerpoVista((vista) => (vista === 'mensaje' ? 'codigo' : 'mensaje'))
+                    }
+                  >
+                    {cuerpoVista === 'mensaje' ? 'Ver código' : 'Ver mensaje'}
+                  </button>
+                </div>
+                <div className="html-body">
+                  {detail.cuerpo
+                    ? cuerpoVista === 'codigo'
+                      ? detail.cuerpo
+                      : htmlATexto(detail.cuerpo) || '—'
+                    : '—'}
+                </div>
                 <div className="actions">
                   {detail.estadoActual === 'error' || detail.estadoActual === 'revisar' ? (
                     <button

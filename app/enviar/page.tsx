@@ -8,7 +8,6 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_TOTAL_BYTES,
 } from '@/lib/attachment-limits';
-import { buzonDeNombre } from '@/lib/mail/buzon-nombre';
 import { sanitizeHtml } from '@/lib/sanitize-html';
 
 type SendOk = {
@@ -97,8 +96,7 @@ const NOMBRE_NO_RESPONDER = 'No responder';
 
 function mailDeSistema(sistemas: Sistema[], origen: string): string {
   const sistema = sistemas.find((s) => s.origen === origen);
-  const local = sistema ? buzonDeNombre(sistema.nombre) : '';
-  return local || BUZON_NO_RESPONDER;
+  return sistema?.origen.trim().toLowerCase() || BUZON_NO_RESPONDER;
 }
 
 /** Nombre visible a partir de un buzón escrito a mano. */
@@ -122,7 +120,7 @@ function remitenteElegido(
   if (!opcion || opcion === BUZON_NO_RESPONDER) {
     return { desde: BUZON_NO_RESPONDER, nombre_remitente: NOMBRE_NO_RESPONDER };
   }
-  const sistema = sistemas.find((s) => buzonDeNombre(s.nombre) === opcion);
+  const sistema = sistemas.find((s) => s.origen.trim().toLowerCase() === opcion);
   return {
     desde: opcion,
     nombre_remitente: sistema?.nombre.trim() || nombreDeBuzon(opcion),
@@ -149,7 +147,7 @@ function opcionesDeEnvio(sistemas: Sistema[]): { value: string; label: string }[
   const opciones: { value: string; label: string }[] = [];
   for (const s of sistemas) {
     if (s.activo === false) continue;
-    const key = buzonDeNombre(s.nombre);
+    const key = s.origen.trim().toLowerCase();
     const titulo = s.nombre.trim();
     if (!key || !titulo || vistos.has(key)) continue;
     vistos.add(key);
@@ -333,9 +331,10 @@ export default function EnviarPage() {
           DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos,{' '}
           {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB cada uno y{' '}
           {MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB en total. Si no elegís sistema,
-          el origen queda como <code>panel</code>. El mail de envío sale del nombre del
-          sistema: «Licencia de conducir» usa <code>licenciadeconducir@{DOMINIO}</code>. Por
-          defecto es <code>no-reply@{DOMINIO}</code> (No responder).
+          el origen queda como <code>panel</code>. El mail de envío usa el campo origen del
+          sistema: si el origen es <code>turnos</code>, sale como <code>turnos@{DOMINIO}</code> y
+          el nombre visible es el del sistema. Por defecto es <code>no-reply@{DOMINIO}</code>{' '}
+          (No responder).
         </p>
       </header>
 
@@ -354,7 +353,7 @@ export default function EnviarPage() {
             <option value="">panel (sin sistema)</option>
             {sistemas.map((s) => (
               <option key={s.id} value={s.origen}>
-                {s.nombre} ({s.origen}) · {buzonDeNombre(s.nombre) || BUZON_NO_RESPONDER}@{DOMINIO}
+                {s.nombre} ({s.origen}) · {s.origen}@{DOMINIO}
                 {s.permiteRawHtml ? ' · HTML libre' : ''}
               </option>
             ))}

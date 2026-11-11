@@ -24,16 +24,48 @@ function dominioDe(email: string): string | null {
   return email.slice(at + 1).toLowerCase();
 }
 
-/** Parte local de un buzón del dominio verificado: `turnos`, no `turnos@otro.com`. */
+/** Parte local de un buzón del dominio verificado: `turnos`, no `turnos@otro.com`. Acepta `_` porque el origen del sistema puede traerlo. */
 function localValido(local: string): boolean {
   if (local.length < 1 || local.length > 64) return false;
-  if (!/^[a-z0-9][a-z0-9._+-]*$/.test(local)) return false;
+  if (!/^[a-z0-9][a-z0-9._+\-]*$/.test(local)) return false;
   if (local.endsWith('.') || local.includes('..')) return false;
   return true;
 }
 
 function nombreVisibleValido(name: string): boolean {
   return name.length > 0 && name.length <= 120 && !/[\u0000-\u001f<>"\\]/.test(name);
+}
+
+/**
+ * Buzón del sistema: el campo `origen`. El nombre visible es el del sistema.
+ * `origen: turnos`, `nombre: Turnos` → `turnos` y `Turnos`.
+ * Null si el origen no es un buzón válido: el envío sigue con el remitente configurado.
+ */
+export function remitenteDeSistema(sistema: {
+  origen: string;
+  nombre?: string | null;
+}): { desde: string; nombre: string } | null {
+  const desde = sistema.origen.trim().toLowerCase();
+  if (!localValido(desde)) return null;
+  const nombre = (sistema.nombre ?? '').trim();
+  return { desde, nombre: nombreVisibleValido(nombre) ? nombre : desde };
+}
+
+/**
+ * Lo que pidió el cliente, o el origen del sistema si no pidió buzón ni nombre.
+ * Un `desde` o un `nombre` explícito no se reemplazan.
+ */
+export function remitentePorDefecto(input: {
+  desde?: string;
+  nombre?: string;
+  sistema?: { origen: string; nombre?: string | null } | null;
+}): { desde?: string; nombre?: string } {
+  if (input.desde?.trim() || input.nombre?.trim()) {
+    return { desde: input.desde, nombre: input.nombre };
+  }
+  if (!input.sistema) return {};
+  const propio = remitenteDeSistema(input.sistema);
+  return propio ? { desde: propio.desde, nombre: propio.nombre } : {};
 }
 
 /**

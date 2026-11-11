@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { config } from '@/lib/config';
 import { mailErrorMessage } from '@/lib/mail';
-import { formatRemitente, remitenteEnHash, resolveMailFrom } from '@/lib/mail/from';
+import { formatRemitente, remitenteEnHash, remitentePorDefecto, resolveMailFrom } from '@/lib/mail/from';
 import {
   findActiveSuppression,
   suppressionErrorDetail,
@@ -22,7 +22,7 @@ import {
   parsePlantillaData,
   renderPlantilla,
 } from '@/lib/mail/plantillas';
-import { clasificacionDe } from '@/lib/mail/sistemas';
+import { PANEL_ORIGEN, clasificacionDe } from '@/lib/mail/sistemas';
 import { processSendJob, QUEUED_PREFIX } from '@/lib/mail/send-job';
 import { recordInternalEvent } from '@/lib/mail/events';
 import { enqueueSendJob } from '@/lib/queue/sqs';
@@ -99,24 +99,6 @@ export async function POST(req: NextRequest) {
     return reply(formatValidationFailure(parsed.error), { status: 400 });
   }
 
-  const elegido = resolveMailFrom({
-    desde: parsed.data.desde,
-    nombre: parsed.data.nombre_remitente,
-  });
-  if (!elegido.ok) {
-    return reply(
-      {
-        ok: false,
-        codigo: 'remitente_invalido',
-        error: elegido.error,
-        detalle: elegido.detalle,
-        log: `Rechazado: ${elegido.detalle}`,
-      },
-      { status: 400 }
-    );
-  }
-  const marcaRemitente = remitenteEnHash(elegido.identity);
-
   const resolved = await resolveOrigin(caller, parsed.data.origen);
   if (!resolved.ok) {
     const codigo = resolved.status === 403 ? 'origen_no_coincide' : 'datos_invalidos';
@@ -133,6 +115,32 @@ export async function POST(req: NextRequest) {
     );
   }
   const { origen, sistema } = resolved;
+
+  const pedidoExplicito = Boolean(parsed.data.desde?.trim() || parsed.data.nombre_remitente?.trim());
+  const elegido = resolveMailFrom(
+    remitentePorDefecto({
+      desde: parsed.data.desde,
+      nombre: parsed.data.nombre_remitente,
+      sistema:
+        sistema && origen !== PANEL_ORIGEN
+          ? { origen: sistema.origen, nombre: sistema.nombre }
+          : null,
+    })
+  );
+  if (!elegido.ok) {
+    return reply(
+      {
+        ok: false,
+        codigo: 'remitente_invalido',
+        error: elegido.error,
+        detalle: elegido.detalle,
+        log: `Rechazado: ${elegido.detalle}`,
+      },
+      { status: 400 }
+    );
+  }
+  // El buzón automático del sistema no entra al hash: un reintento del mismo body sigue siendo el mismo mail.
+  const marcaRemitente = pedidoExplicito ? remitenteEnHash(elegido.identity) : {};
   const { email, nombre, adjuntos } = parsed.data;
   const filenames = adjuntos.map((a) => a.filename);
 

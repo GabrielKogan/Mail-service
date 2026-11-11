@@ -64,9 +64,11 @@ export default function HomePage() {
         </div>
         <p className="muted">
           La llamada sale del backend del sistema, con la clave en <span className="code">x-api-key</span>.
-          El origen lo define esa clave, no el cuerpo del request. Para salir como{' '}
-          <span className="code">turnos@</span> o <span className="code">rentas@</span>, el mismo
-          request manda <span className="code">desde</span> y, si hace falta,{' '}
+          El origen lo define esa clave, no el cuerpo del request. Si no se manda{' '}
+          <span className="code">desde</span>, el mail sale desde ese origen: un sistema{' '}
+          <span className="code">turnos</span> usa <span className="code">turnos@</span> y el
+          nombre visible del sistema. Para otro buzón, el request manda{' '}
+          <span className="code">desde</span> y, si hace falta,{' '}
           <span className="code">nombre_remitente</span>. La guía completa tiene los mismos
           campos, códigos y ejemplos que el README.
         </p>

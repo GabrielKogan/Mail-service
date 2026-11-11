@@ -3,7 +3,9 @@ import {
   formatRemitente,
   getMailFrom,
   parseRemitente,
+  remitenteDeSistema,
   remitenteEnHash,
+  remitentePorDefecto,
   resolveMailFrom,
 } from '@/lib/mail/from';
 import { computeRequestHash } from '@/lib/mail/idempotency';
@@ -12,6 +14,76 @@ import { buildRawMessage } from '@/lib/mail/providers/ses-api';
 function dominio(): string {
   return getMailFrom().email.split('@')[1].toLowerCase();
 }
+
+const licencia = { origen: 'licencia', nombre: 'Licencia de conducir' };
+
+describe('remitente del sistema', () => {
+  it('usa el origen como buzón y el nombre del sistema como visible', () => {
+    expect(remitenteDeSistema(licencia)).toEqual({
+      desde: 'licencia',
+      nombre: 'Licencia de conducir',
+    });
+    expect(remitenteDeSistema({ origen: '  Turnos  ', nombre: 'Turnos' })).toEqual({
+      desde: 'turnos',
+      nombre: 'Turnos',
+    });
+    expect(remitenteDeSistema({ origen: 'atencion_vecino', nombre: 'Atención al vecino' })).toEqual({
+      desde: 'atencion_vecino',
+      nombre: 'Atención al vecino',
+    });
+    expect(remitenteDeSistema({ origen: 'mesa-entrada', nombre: 'Mesa de entrada' })).toEqual({
+      desde: 'mesa-entrada',
+      nombre: 'Mesa de entrada',
+    });
+    expect(remitenteDeSistema({ origen: 'mesa-entrada', nombre: 'Mesa de entrada' })).toEqual({
+      desde: 'mesa-entrada',
+      nombre: 'Mesa de entrada',
+    });
+  });
+
+  it('no inventa un buzón si el origen no sirve', () => {
+    expect(remitenteDeSistema({ origen: '---', nombre: 'Roto' })).toBeNull();
+    expect(remitenteDeSistema({ origen: '.turnos', nombre: 'Turnos' })).toBeNull();
+    expect(remitenteDeSistema({ origen: 'a'.repeat(65), nombre: 'Largo' })).toBeNull();
+  });
+
+  it('si el nombre visible no sirve, el buzón sigue siendo el origen', () => {
+    expect(remitenteDeSistema({ origen: 'turnos', nombre: 'Turnos <interno>' })).toEqual({
+      desde: 'turnos',
+      nombre: 'turnos',
+    });
+  });
+
+  it('si el sistema no pidió remitente, usa su origen', () => {
+    const domain = dominio();
+    const pedido = remitentePorDefecto({ sistema: licencia });
+    expect(resolveMailFrom(pedido)).toEqual({
+      ok: true,
+      identity: {
+        email: `licencia@${domain}`,
+        name: 'Licencia de conducir',
+      },
+    });
+  });
+
+  it('un desde o un nombre explícito no se pisan, y sin sistema queda el de siempre', () => {
+    const base = getMailFrom();
+    expect(remitentePorDefecto({})).toEqual({});
+    expect(remitentePorDefecto({ sistema: { origen: '---', nombre: 'Roto' } })).toEqual({});
+    expect(resolveMailFrom(remitentePorDefecto({ sistema: null }))).toEqual({
+      ok: true,
+      identity: base,
+    });
+    expect(remitentePorDefecto({ desde: 'registro', sistema: licencia })).toEqual({
+      desde: 'registro',
+      nombre: undefined,
+    });
+    expect(remitentePorDefecto({ nombre: 'Registro Civil', sistema: licencia })).toEqual({
+      desde: undefined,
+      nombre: 'Registro Civil',
+    });
+  });
+});
 
 describe('resolveMailFrom', () => {
   it('sin datos usa el remitente configurado', () => {

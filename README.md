@@ -118,8 +118,8 @@ Tipos: `turno_confirmacion`, `turno_recordatorio` (solo `turnos`), `expediente_a
 | `tipo` + `data` | plantilla (recomendado) |
 | `asunto` + `cuerpo` | HTML libre, solo si el sistema lo permite. No se mezclan con `tipo` |
 | `nombre` | opcional; nombre del destinatario, lo usa el saludo de la plantilla |
-| `desde` | opcional; buzón del remitente (`turnos` o `turnos@lujandecuyo.gob.ar`). El dominio tiene que ser el de `MAIL_FROM_EMAIL`. Vacío usa ese remitente. Otro dominio: 400 `remitente_invalido` |
-| `nombre_remitente` | opcional; nombre visible (por ejemplo `Turnos`). Vacío usa `MAIL_FROM_NAME` |
+| `desde` | opcional; buzón del remitente (`turnos` o `turnos@lujandecuyo.gob.ar`). El dominio tiene que ser el de `MAIL_FROM_EMAIL`. Si `desde` y `nombre_remitente` vienen vacíos, el buzón es el `origen` del sistema (`turnos` → `turnos@…`) y el nombre visible es el del sistema. El panel, sin sistema, usa `MAIL_FROM_EMAIL`. Otro dominio: 400 `remitente_invalido` |
+| `nombre_remitente` | opcional; nombre visible (por ejemplo `Turnos`). Si no se manda junto con `desde`, se usa el nombre del sistema. No admite saltos de línea ni `< > "` |
 | `idempotency_key` | recomendado: único por mail lógico, `^[A-Za-z0-9._:-]+$`, hasta 200 |
 | `origen` | opcional; si se manda distinto al de la clave, 403 |
 | `adjuntos` | hasta 15, 20 MB c/u y 28 MB en total: PDF, DOC, DOCX, PNG, JPG, GIF, WEBP |

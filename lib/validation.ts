@@ -86,10 +86,12 @@ export const enviarMailSchema = z
     origen: z.string().max(120).optional(),
     /**
      * Buzón del remitente: `turnos` o `turnos@dominio`.
-     * El dominio tiene que ser el de MAIL_FROM_EMAIL. Vacío = el remitente configurado.
+     * El dominio tiene que ser el de MAIL_FROM_EMAIL.
+     * Vacío, y sin `nombre_remitente`, usa el origen del sistema (`turnos`).
+     * El panel, sin sistema, sigue con el remitente configurado.
      */
     desde: z.string().max(320).optional(),
-    /** Nombre visible del remitente. Vacío = MAIL_FROM_NAME. */
+    /** Nombre visible del remitente. Vacío, junto con `desde`, usa el nombre del sistema. */
     nombre_remitente: z
       .string()
       .max(120)
