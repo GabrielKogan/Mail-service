@@ -917,6 +917,38 @@ pre.code-block {
   min-height: 280px;
 }
 
+.stats-chart-pie {
+  min-height: 220px;
+}
+
+.stats-pie-top {
+  list-style: none;
+  margin: 0 0 0.85rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.stats-pie-top li {
+  display: grid;
+  grid-template-columns: 0.7rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.stats-pie-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+}
+
+.stats-pie-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--navy);
+}
+
 @media (max-width: 800px) {
   .stats-grid {
     grid-template-columns: 1fr;

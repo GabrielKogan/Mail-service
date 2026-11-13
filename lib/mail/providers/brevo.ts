@@ -2,9 +2,8 @@ import { MailProviderError } from '../errors';
 import { getMailFrom } from '../from';
 import type { MailMessage, MailProvider, MailSendResult } from '../types';
 
-export function brevoApiKey(): string | undefined {
-  const key = process.env.BREVO_API_KEY?.trim();
-  return key || undefined;
+export function brevoApiKey(): string {
+  return process.env.BREVO_API_KEY?.trim() ?? '';
 }
 
 function brevoErrorMessageBody(body: any): string {
@@ -19,7 +18,7 @@ export class BrevoProvider implements MailProvider {
       throw new MailProviderError('Falta BREVO_API_KEY');
     }
 
-    const from = message.from ?? getMailFrom();
+    const from = getMailFrom();
     const payload: any = {
       sender: { name: from.name, email: from.email },
       to: [{ email: message.to, name: message.toName || message.to }],

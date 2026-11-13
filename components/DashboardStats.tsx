@@ -109,6 +109,70 @@ function pctOf(n: number, total: number): string {
   return `${Math.round((n / total) * 1000) / 10}%`;
 }
 
+const TOP_TORTA = 5;
+
+type TortaDato = {
+  id: string;
+  nombre: string;
+  cantidad: number;
+  porcentaje?: number;
+  fill: string;
+};
+
+function topTorta(datos: TortaDato[]): TortaDato[] {
+  return [...datos].sort((a, b) => b.cantidad - a.cantidad).slice(0, TOP_TORTA);
+}
+
+function pctTorta(row: TortaDato, total: number): string {
+  if (typeof row.porcentaje === 'number') return `${row.porcentaje}%`;
+  return pctOf(row.cantidad, total);
+}
+
+function Torta({ datos, total }: { datos: TortaDato[]; total: number }) {
+  const top = topTorta(datos);
+  if (!top.length) return null;
+  return (
+    <>
+      <div className="stats-chart stats-chart-pie">
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+            <Pie
+              data={top}
+              dataKey="cantidad"
+              nameKey="nombre"
+              cx="50%"
+              cy="50%"
+              outerRadius={88}
+              innerRadius={42}
+              paddingAngle={top.length > 1 ? 2 : 0}
+              stroke="none"
+            >
+              {top.map((entry) => (
+                <Cell key={entry.id} fill={entry.fill} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(value, name) => [
+                `${typeof value === 'number' ? value : Number(value)} mails`,
+                String(name),
+              ]}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <ul className="stats-pie-top">
+        {top.map((row) => (
+          <li key={row.id}>
+            <span className="stats-pie-swatch" style={{ background: row.fill }} />
+            <span>{row.nombre}</span>
+            <span className="stats-pie-pct">{pctTorta(row, total)}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
 export function DashboardStats({
   data,
   loading,
@@ -247,42 +311,16 @@ export function DashboardStats({
       <div className="stats-grid">
         <section className="card stats-card">
           <h2 className="stats-card-title">Estados — cantidad y %</h2>
-          <div className="stats-chart">
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={porEstado}
-                  dataKey="cantidad"
-                  nameKey="estado"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={88}
-                  innerRadius={42}
-                  paddingAngle={2}
-                  label={(props) => {
-                    const name = String(props.name ?? '');
-                    const value = Number(props.value ?? 0);
-                    const pct = ((props.percent ?? 0) * 100).toFixed(0);
-                    return `${name}: ${value} (${pct}%)`;
-                  }}
-                >
-                  {porEstado.map((entry) => (
-                    <Cell
-                      key={entry.estado}
-                      fill={ESTADO_COLORS[entry.estado] ?? '#5c6b63'}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value, name) => [
-                    `${typeof value === 'number' ? value : Number(value)} mails`,
-                    String(name),
-                  ]}
-                />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          <Torta
+            total={resumen.total}
+            datos={porEstado.map((row) => ({
+              id: row.estado,
+              nombre: row.estado,
+              cantidad: row.cantidad,
+              porcentaje: row.porcentaje,
+              fill: ESTADO_COLORS[row.estado] ?? '#5c6b63',
+            }))}
+          />
           <TablaColapsable etiqueta={`Ver registros (${porEstado.length})`}>
             <table>
               <thead>
@@ -326,44 +364,18 @@ export function DashboardStats({
 
         <section className="card stats-card">
           <h2 className="stats-card-title">Origen de los mails — cantidad y %</h2>
-          <div className="stats-chart">
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={porOrigen}
-                  dataKey="cantidad"
-                  nameKey="origen"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={88}
-                  innerRadius={42}
-                  paddingAngle={2}
-                >
-                  {porOrigen.map((entry, i) => (
-                    <Cell
-                      key={entry.origen}
-                      fill={ORIGEN_PALETTE[i % ORIGEN_PALETTE.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value, name, item) => {
-                    const payload = item?.payload as
-                      | { porcentaje?: number }
-                      | undefined;
-                    const n = typeof value === 'number' ? value : Number(value);
-                    const pct =
-                      payload?.porcentaje ??
-                      (resumen.total
-                        ? Math.round((n / resumen.total) * 1000) / 10
-                        : 0);
-                    return [`${n} mails (${pct}%)`, String(name)];
-                  }}
-                />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          <Torta
+            total={resumen.total}
+            datos={[...porOrigen]
+              .sort((a, b) => b.cantidad - a.cantidad)
+              .map((row, i) => ({
+                id: row.origen,
+                nombre: row.origen,
+                cantidad: row.cantidad,
+                porcentaje: row.porcentaje,
+                fill: ORIGEN_PALETTE[i % ORIGEN_PALETTE.length],
+              }))}
+          />
           <TablaColapsable etiqueta={`Ver registros (${porOrigen.length})`}>
             <table>
               <thead>
@@ -407,42 +419,16 @@ export function DashboardStats({
             <p className="muted" style={{ margin: '0 0 0.5rem', fontSize: '0.85rem' }}>
               Hotmail incluye Outlook, Live y MSN. Los dominios institucionales y el resto van en Otros.
             </p>
-            <div className="stats-chart">
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={porServicio}
-                    dataKey="cantidad"
-                    nameKey="servicio"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={88}
-                    innerRadius={42}
-                    paddingAngle={2}
-                    label={(props) => {
-                      const name = String(props.name ?? '');
-                      const value = Number(props.value ?? 0);
-                      const pct = ((props.percent ?? 0) * 100).toFixed(0);
-                      return `${name}: ${value} (${pct}%)`;
-                    }}
-                  >
-                    {porServicio.map((entry) => (
-                      <Cell
-                        key={entry.servicio}
-                        fill={SERVICIO_COLORS[entry.servicio] ?? '#5c6b63'}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value, name) => [
-                      `${typeof value === 'number' ? value : Number(value)} mails`,
-                      String(name),
-                    ]}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
+            <Torta
+              total={resumen.total}
+              datos={porServicio.map((row) => ({
+                id: row.servicio,
+                nombre: row.servicio,
+                cantidad: row.cantidad,
+                porcentaje: row.porcentaje,
+                fill: SERVICIO_COLORS[row.servicio] ?? '#5c6b63',
+              }))}
+            />
             <TablaColapsable etiqueta={`Ver registros (${porServicio.length})`}>
               <table>
                 <thead>
