@@ -328,7 +328,7 @@ export default function EnviarPage() {
         <p className="muted">
           Usa el mismo endpoint que los sistemas internos. Elegí una plantilla
           (tipo + data) o, si el sistema lo permite, HTML libre. Adjuntá PDF,
-          DOC/DOCX e imágenes, hasta {MAX_ATTACHMENTS} archivos,{' '}
+          DOC/DOCX, Excel (XLS/XLSX), SQL, DB e imágenes, hasta {MAX_ATTACHMENTS} archivos,{' '}
           {MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB cada uno y{' '}
           {MAX_ATTACHMENTS_TOTAL_BYTES / (1024 * 1024)} MB en total. Si no elegís sistema,
           el origen queda como <code>panel</code>. El mail de envío usa el campo origen del

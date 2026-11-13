@@ -1,5 +1,5 @@
 import type { ZodError, ZodIssue } from 'zod';
-import { MAX_ATTACHMENTS } from '@/lib/attachment-limits';
+import { ALLOWED_ATTACHMENT_LABEL, MAX_ATTACHMENTS } from '@/lib/attachment-limits';
 
 /** Prioridad del `codigo` cuando un request trae varios problemas de adjuntos. */
 export const ATTACHMENT_CODE_PRIORITY = [
@@ -88,7 +88,7 @@ function detailFrom(issue: ZodIssue, codigo: AttachmentCode): AttachmentDetail {
 function logLine(detail: AttachmentDetail): string {
   switch (detail.codigo) {
     case 'tipo_adjunto_no_permitido':
-      return `"${detail.archivo ?? 'archivo'}" no es un tipo permitido (PDF, DOC, DOCX, PNG, JPG, GIF o WEBP)`;
+      return `"${detail.archivo ?? 'archivo'}" no es un tipo permitido (${ALLOWED_ATTACHMENT_LABEL})`;
     case 'nombre_archivo_invalido':
       return detail.archivo
         ? `el nombre "${detail.archivo}" no es válido`

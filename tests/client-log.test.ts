@@ -28,6 +28,27 @@ describe('formatMb', () => {
 });
 
 describe('límites de adjuntos', () => {
+  it('acepta Excel, SQL y DB', () => {
+    for (const adjunto of [
+      {
+        filename: 'planilla.xlsx',
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+      { filename: 'planilla.xls', contentType: 'application/vnd.ms-excel' },
+      { filename: 'consulta.sql', contentType: 'text/plain' },
+      { filename: 'datos.db', contentType: 'application/x-sqlite3' },
+      { filename: 'datos.db', contentType: 'application/octet-stream' },
+    ]) {
+      const parsed = enviarMailSchema.safeParse({
+        email: 'a@b.com',
+        asunto: 'A',
+        cuerpo: '<p>x</p>',
+        adjuntos: [{ ...adjunto, contentBase64: 'YQ==' }],
+      });
+      expect(parsed.success, adjunto.filename).toBe(true);
+    }
+  });
+
   it('rechaza un tipo no permitido', () => {
     const body = failureOf({
       email: 'a@b.com',

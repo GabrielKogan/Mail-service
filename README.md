@@ -122,7 +122,7 @@ Tipos: `turno_confirmacion`, `turno_recordatorio` (solo `turnos`), `expediente_a
 | `nombre_remitente` | opcional; nombre visible (por ejemplo `Turnos`). Si no se manda junto con `desde`, se usa el nombre del sistema. No admite saltos de línea ni `< > "` |
 | `idempotency_key` | recomendado: único por mail lógico, `^[A-Za-z0-9._:-]+$`, hasta 200 |
 | `origen` | opcional; si se manda distinto al de la clave, 403 |
-| `adjuntos` | hasta 15, 20 MB c/u y 28 MB en total: PDF, DOC, DOCX, PNG, JPG, GIF, WEBP |
+| `adjuntos` | hasta 15, 20 MB c/u y 28 MB en total: PDF, DOC, DOCX, XLS, XLSX, SQL, DB, PNG, JPG, GIF, WEBP |
 
 Toda respuesta incluye `ok`, `codigo` y `log`. `log` es una frase para guardar en el sistema
 cliente (destinatario, id, archivos y el límite que se pasó). No trae el base64 ni el cuerpo.

@@ -338,12 +338,6 @@ export function DashboardStats({
                   outerRadius={88}
                   innerRadius={42}
                   paddingAngle={2}
-                  label={(props) => {
-                    const name = String(props.name ?? '');
-                    const value = Number(props.value ?? 0);
-                    const pct = ((props.percent ?? 0) * 100).toFixed(0);
-                    return `${name}: ${value} (${pct}%)`;
-                  }}
                 >
                   {porOrigen.map((entry, i) => (
                     <Cell
@@ -353,10 +347,18 @@ export function DashboardStats({
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value, name) => [
-                    `${typeof value === 'number' ? value : Number(value)} mails`,
-                    String(name),
-                  ]}
+                  formatter={(value, name, item) => {
+                    const payload = item?.payload as
+                      | { porcentaje?: number }
+                      | undefined;
+                    const n = typeof value === 'number' ? value : Number(value);
+                    const pct =
+                      payload?.porcentaje ??
+                      (resumen.total
+                        ? Math.round((n / resumen.total) * 1000) / 10
+                        : 0);
+                    return [`${n} mails (${pct}%)`, String(name)];
+                  }}
                 />
                 <Legend />
               </PieChart>

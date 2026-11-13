@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  ALLOWED_ATTACHMENT_LABEL,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENTS_TOTAL_BYTES,
@@ -32,7 +33,7 @@ const adjuntoSchema = z
     if (!isAllowedAttachment(val.filename, val.contentType)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Tipo no permitido: ${val.filename}. Usá PDF, DOC, DOCX, PNG, JPG, GIF o WEBP.`,
+        message: `Tipo no permitido: ${val.filename}. Usá ${ALLOWED_ATTACHMENT_LABEL}.`,
         path: ['filename'],
         params: { codigo: 'tipo_adjunto_no_permitido', archivo: val.filename },
       });

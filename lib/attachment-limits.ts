@@ -12,6 +12,17 @@ const ALLOWED_BY_EXT: Record<string, string[]> = {
   docx: [
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   ],
+  xls: [
+    'application/vnd.ms-excel',
+    'application/excel',
+    'application/x-excel',
+    'application/x-msexcel',
+  ],
+  xlsx: [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ],
+  sql: ['application/sql', 'application/x-sql', 'text/plain', 'text/x-sql', 'text/sql'],
+  db: ['application/vnd.sqlite3', 'application/x-sqlite3'],
   png: ['image/png'],
   jpg: ['image/jpeg', 'image/jpg'],
   jpeg: ['image/jpeg', 'image/jpg'],
@@ -20,6 +31,10 @@ const ALLOWED_BY_EXT: Record<string, string[]> = {
 };
 
 export const ALLOWED_ATTACHMENT_EXTENSIONS = Object.keys(ALLOWED_BY_EXT);
+
+/** Lista para mensajes al cliente. JPG y JPEG cuentan como el mismo tipo. */
+export const ALLOWED_ATTACHMENT_LABEL =
+  'PDF, DOC, DOCX, XLS, XLSX, SQL, DB, PNG, JPG, GIF o WEBP';
 
 export function extensionOf(filename: string): string {
   const i = filename.lastIndexOf('.');

@@ -9,7 +9,7 @@ const campos = [
   ['nombre_remitente', 'Opcional. Nombre visible junto a la dirección (por ejemplo Turnos). Si no se manda junto con desde, se usa el nombre del sistema. No admite saltos de línea ni < > ".'],
   ['idempotency_key', 'Única por mail lógico. Letras, números y . _ : -, hasta 200 caracteres. El reintento usa la misma.'],
   ['origen', 'Opcional. Si no coincide con la clave, la API responde 403 origen_no_coincide.'],
-  ['adjuntos', 'Hasta 15 archivos, 20 MB cada uno y 28 MB en total. PDF, DOC, DOCX, PNG, JPG, GIF o WEBP, en contentBase64 sin el prefijo data:.'],
+  ['adjuntos', 'Hasta 15 archivos, 20 MB cada uno y 28 MB en total. PDF, DOC, DOCX, XLS, XLSX, SQL, DB, PNG, JPG, GIF o WEBP, en contentBase64 sin el prefijo data:.'],
 ];
 
 const respuestas = [
@@ -26,7 +26,7 @@ const respuestas = [
 ];
 
 const adjuntos = [
-  ['tipo_adjunto_no_permitido', 'La extensión o el MIME no es PDF, DOC, DOCX, PNG, JPG, GIF ni WEBP.'],
+  ['tipo_adjunto_no_permitido', 'La extensión o el MIME no es PDF, DOC, DOCX, XLS, XLSX, SQL, DB, PNG, JPG, GIF ni WEBP.'],
   ['nombre_archivo_invalido', 'El nombre trae una barra o está vacío.'],
   ['adjunto_vacio', 'El base64 no tiene contenido.'],
   ['adjunto_demasiado_grande', 'Ese archivo supera 20 MB.'],
