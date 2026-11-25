@@ -100,6 +100,19 @@ function formatFecha(iso: string): string {
   return d.toLocaleString('es-AR');
 }
 
+function FechaCelda({ iso }: { iso: string }) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return <>{iso}</>;
+  return (
+    <span className="fecha-stack">
+      <span>{d.toLocaleDateString('es-AR')}</span>
+      <span className="hora">
+        {d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+      </span>
+    </span>
+  );
+}
+
 function badgeClass(estado: string): string {
   if (
     estado === 'error' ||
@@ -777,7 +790,17 @@ export default function DashboardPage() {
           {data && data.items.length > 0 ? (
             <>
               <div className="table-wrap">
-                <table>
+                <table className="registro-table">
+                  <colgroup>
+                    <col className="col-fecha" />
+                    <col className="col-dest" />
+                    <col className="col-asunto" />
+                    <col className="col-origen" />
+                    <col className="col-tipo" />
+                    <col className="col-estado" />
+                    <col className="col-llego" />
+                    <col className="col-abrio" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>Fecha</th>
@@ -797,7 +820,9 @@ export default function DashboardPage() {
                         className="clickable"
                         onClick={() => void openDetail(row.id)}
                       >
-                        <td>{formatFecha(row.fechaEnvio)}</td>
+                        <td>
+                          <FechaCelda iso={row.fechaEnvio} />
+                        </td>
                         <td>{row.destinatario}</td>
                         <td>{row.asunto}</td>
                         <td>{row.origen ?? '—'}</td>
@@ -818,8 +843,8 @@ export default function DashboardPage() {
                             {row.rebotado ? 'Rebotó' : row.llego ? 'Sí' : 'Sin dato'}
                           </span>
                           {row.llego && row.fechaEntrega ? (
-                            <div className="muted" style={{ fontSize: '0.75rem', marginTop: 2 }}>
-                              {formatFecha(row.fechaEntrega)}
+                            <div className="muted fecha-sub">
+                              <FechaCelda iso={row.fechaEntrega} />
                             </div>
                           ) : null}
                         </td>
@@ -828,8 +853,8 @@ export default function DashboardPage() {
                             {row.abrio ? 'Sí' : 'Sin dato'}
                           </span>
                           {row.abrio && row.fechaApertura ? (
-                            <div className="muted" style={{ fontSize: '0.75rem', marginTop: 2 }}>
-                              {formatFecha(row.fechaApertura)}
+                            <div className="muted fecha-sub">
+                              <FechaCelda iso={row.fechaApertura} />
                             </div>
                           ) : null}
                         </td>

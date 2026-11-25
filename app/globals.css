@@ -534,6 +534,69 @@ a:hover {
   box-shadow: var(--shadow);
 }
 
+.registro-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.registro-table .col-fecha { width: 12%; }
+.registro-table .col-dest { width: 18%; }
+.registro-table .col-asunto { width: 20%; }
+.registro-table .col-origen { width: 11%; }
+.registro-table .col-tipo { width: 6%; }
+.registro-table .col-estado { width: 15%; }
+.registro-table .col-llego { width: 9%; }
+.registro-table .col-abrio { width: 9%; }
+
+.registro-table th,
+.registro-table td {
+  white-space: normal;
+  overflow-wrap: break-word;
+  vertical-align: top;
+  padding: 0.62rem 0.5rem;
+}
+
+.registro-table th {
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+}
+
+.registro-table .badge {
+  white-space: normal;
+  line-height: 1.25;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.fecha-stack {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .fecha-stack {
+    white-space: normal;
+  }
+}
+
+.fecha-stack .hora {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.fecha-sub {
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.fecha-sub .fecha-stack .hora {
+  font-size: 0.72rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
